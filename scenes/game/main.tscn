@@ -1,6 +1,6 @@
-[gd_scene load_steps=2 format=3 uid="uid://bonoegxk24f46"]
+[gd_scene format=3 uid="uid://bonoegxk24f46"]
 
-[ext_resource type="Script" path="res://scripts/game/prototype_ui.gd" id="1_ui"]
+[ext_resource type="Script" uid="uid://d8s0wq4hg6yp" path="res://scripts/game/prototype_ui.gd" id="1_ui"]
 
 [node name="main" type="Control" unique_id=1312160044]
 layout_mode = 3

@@ -2,11 +2,11 @@ extends RefCounted
 
 ## A single experimental combat encounter. Values here are playtest parameters.
 
-const COLORS: Array[String] = ["Red", "Yellow", "Green", "Blue"]
+const CardCatalog = preload("res://scripts/game/card_catalog.gd")
+const COLORS: Array[String] = CardCatalog.COLORS
 const STARTING_HEALTH := 8
 const STARTING_HAND_SIZE := 5
 const ALL_OUT_DAMAGE := 3
-const PLAYER_CARD_DAMAGE := 1
 const ENEMY_ATTACK_DAMAGE := 1
 const ENEMY_ATTACK_INTERVAL := 2
 const MAX_REPLAY_CHAIN := 8
@@ -47,14 +47,7 @@ func new_game() -> void:
 	_skip_enemy_uno = false
 	_skip_player_turn = false
 
-	for color in COLORS:
-		for number in range(10):
-			draw_pile.append(_card(color, "number", number))
-		for copy in range(2):
-			draw_pile.append(_card(color, "replay"))
-			draw_pile.append(_card(color, "skip"))
-	for copy in range(4):
-		draw_pile.append(_card("Wild", "wild"))
+	draw_pile = CardCatalog.make_deck()
 	draw_pile.shuffle()
 	_draw_to(player_hand, STARTING_HAND_SIZE)
 	_draw_to(enemy_hand, STARTING_HAND_SIZE)
@@ -75,11 +68,7 @@ func top_card() -> Dictionary:
 
 
 func card_label(card: Dictionary) -> String:
-	if card["kind"] == "number":
-		return "%s %d" % [card["color"], card["number"]]
-	if card["kind"] == "wild":
-		return "Wild"
-	return "%s %s" % [card["color"], card["kind"].capitalize()]
+	return CardCatalog.label(card)
 
 
 func can_play(card: Dictionary) -> bool:
@@ -101,19 +90,22 @@ func play_player_card(index: int, wild_color: String = "") -> bool:
 		return false
 	if card["kind"] == "wild" and not COLORS.has(wild_color):
 		return false
+	if card["kind"] != "wild" and wild_color != "":
+		return false
 
 	player_hand.remove_at(index)
 	_play_to_discard(card, wild_color)
-	_log("You played %s. Enemy takes %d damage." % [card_label(card), PLAYER_CARD_DAMAGE])
-	enemy_health -= PLAYER_CARD_DAMAGE
+	var damage: int = CardCatalog.damage(card)
+	_log("You played %s%s. Enemy takes %d damage." % [card_label(card), " (" + wild_color + ")" if wild_color != "" else "", damage])
+	enemy_health -= damage
 	if _check_outcome():
 		return true
 
-	if card["kind"] == "skip":
+	if CardCatalog.skips_next_uno(card):
 		_skip_enemy_uno = true
 		_log("Enemy UNO action will be skipped this round.")
-	elif card["kind"] == "replay":
-		_player_actions += 1
+	if CardCatalog.extra_actions(card) > 0:
+		_player_actions += CardCatalog.extra_actions(card)
 		_log("Replay gives you another card action.")
 
 	if player_hand.is_empty():
@@ -134,7 +126,7 @@ func draw_player_card() -> bool:
 	if phase != "player":
 		return false
 	if _draw_to(player_hand, 1) == 0:
-		_log("No card is available to draw.")
+		_log("No card is available to draw; your turn ends.")
 	else:
 		_log("You drew one card and ended your turn.")
 	_player_actions = 0
@@ -143,6 +135,8 @@ func draw_player_card() -> bool:
 
 
 func _complete_round() -> void:
+	# Public player actions are rejected until the entire enemy sequence resolves.
+	phase = "enemy"
 	while phase != "finished":
 		if _skip_enemy_uno:
 			_log("Enemy UNO action skipped.")
@@ -155,14 +149,14 @@ func _complete_round() -> void:
 		completed_rounds += 1
 		if completed_rounds % ENEMY_ATTACK_INTERVAL == 0:
 			player_health -= ENEMY_ATTACK_DAMAGE
-			_log("Scheduled enemy attack deals %d damage." % ENEMY_ATTACK_DAMAGE)
+			_log("Scheduled enemy attack deals %d damage." % ENEMY_ATTACK_DAMAGE, completed_rounds)
 			if _check_outcome():
 				return
 
 		_player_actions = 1
 		if _skip_player_turn:
 			_skip_player_turn = false
-			_log("Your UNO action is skipped this round.")
+			_log("Your next UNO action was skipped.")
 			continue
 		phase = "player"
 		return
@@ -193,10 +187,10 @@ func _enemy_uno_action() -> void:
 		_log("Enemy played %s%s." % [card_label(card), " (" + chosen_color + ")" if chosen_color != "" else ""])
 		actions -= 1
 		played += 1
-		if card["kind"] == "replay":
-			actions += 1
-		elif card["kind"] == "skip":
+		actions += CardCatalog.extra_actions(card)
+		if CardCatalog.skips_next_uno(card):
 			_skip_player_turn = true
+			_log("Your next UNO action will be skipped.")
 
 		if enemy_hand.is_empty():
 			player_health -= ALL_OUT_DAMAGE
@@ -205,6 +199,8 @@ func _enemy_uno_action() -> void:
 				return
 			_draw_to(enemy_hand, STARTING_HAND_SIZE)
 			_log("Enemy receives a new hand.")
+	if actions > 0 and played >= MAX_REPLAY_CHAIN:
+		_log("Enemy Replay chain ended after %d cards." % MAX_REPLAY_CHAIN)
 
 
 func _play_to_discard(card: Dictionary, wild_color: String) -> void:
@@ -250,24 +246,23 @@ func _enemy_color_choice() -> String:
 
 
 func _check_outcome() -> bool:
+	if phase == "finished":
+		return true
 	if enemy_health <= 0:
 		phase = "finished"
 		result = "Victory"
-		_log("Enemy defeated.")
+		_log("VICTORY — Enemy defeated.")
 		return true
 	if player_health <= 0:
 		phase = "finished"
 		result = "Defeat"
-		_log("You were defeated.")
+		_log("DEFEAT — You were defeated.")
 		return true
 	return false
 
 
-func _log(message: String) -> void:
-	events.push_front(message)
+func _log(message: String, round_number: int = -1) -> void:
+	var logged_round := completed_rounds + 1 if round_number == -1 else round_number
+	events.push_front("Round %d: %s" % [logged_round, message])
 	if events.size() > 10:
 		events.resize(10)
-
-
-func _card(color: String, kind: String, number: int = -1) -> Dictionary:
-	return {"color": color, "kind": kind, "number": number}
