@@ -2,118 +2,152 @@ extends RefCounted
 
 ## A single experimental combat encounter. Values here are playtest parameters.
 
-const COLORS: Array[String] = ["Red", "Yellow", "Green", "Blue"]
-const STARTING_HEALTH := 8
+const EnemyAI = preload("res://scripts/game/enemy_ai.gd")
+const EnemyProfiles = preload("res://scripts/game/enemy_profiles.gd")
+const EnemyState = preload("res://scripts/game/enemy_state.gd")
+const PlayerDeck = preload("res://scripts/game/player_deck.gd")
+const EncounterDataScript = preload("res://scripts/content/encounter_data.gd")
+
+const COLORS: Array[Card.CardColor] = CardSystem.STANDARD_COLORS
+const STARTING_HEALTH := 20
 const STARTING_HAND_SIZE := 5
 const ALL_OUT_DAMAGE := 3
-const PLAYER_CARD_DAMAGE := 1
-const ENEMY_ATTACK_DAMAGE := 1
-const ENEMY_ATTACK_INTERVAL := 2
 const MAX_REPLAY_CHAIN := 8
+const PHASE_PLAYER := "player"
+const PHASE_ENEMY := "enemy"
+const PHASE_FINISHED := "finished"
 
-var draw_pile: Array[Dictionary] = []
-var discard_pile: Array[Dictionary] = []
-var player_hand: Array[Dictionary] = []
-var enemy_hand: Array[Dictionary] = []
-var active_color := ""
+var draw_pile: Array[Card] = []
+var discard_pile: Array[Card] = []
+var player_hand: Array[Card] = []
+var player_deck: PlayerDeck
+var _enemy_state: EnemyState
+var enemy_hand: Array[Card]:
+	get: return _enemy_state.hand
+	set(value): _enemy_state.hand = value
+var active_color: Card.CardColor = Card.CardColor.RED
 var player_health := STARTING_HEALTH
-var enemy_health := STARTING_HEALTH
+var enemy_health: int:
+	get: return _enemy_state.health
+	set(value): _enemy_state.health = value
 var completed_rounds := 0
-var phase := "player"
+var phase: String = PHASE_PLAYER
 var result := ""
 var events: Array[String] = []
+var enemy_id: String:
+	get: return _enemy_state.id
+	set(value): _enemy_state.id = value
 
 var _player_actions := 1
 var _skip_enemy_uno := false
 var _skip_player_turn := false
+var _profile_override: Dictionary = {}
 
 
 func _init() -> void:
+	_enemy_state = EnemyState.new("standard", STARTING_HEALTH)
+	player_deck = PlayerDeck.new()
 	new_game()
 
 
-func new_game() -> void:
+func start_encounter(id: String, starting_player_health: int = STARTING_HEALTH) -> bool:
+	if not EnemyProfiles.is_valid(id):
+		return false
+	_profile_override.clear()
+	enemy_id = id
+	new_game(starting_player_health)
+	return true
+
+
+func start_encounter_from_data(encounter_data: EncounterDataScript, starting_player_health: int = STARTING_HEALTH) -> bool:
+	if encounter_data == null or not encounter_data.is_valid():
+		return false
+	enemy_id = encounter_data.enemy_profile_id
+	_profile_override = encounter_data.resolve_enemy_profile()
+	new_game(starting_player_health)
+	return true
+
+
+func enemy_profile() -> Dictionary:
+	if not _profile_override.is_empty() and _profile_override.get("id", enemy_id) == enemy_id:
+		return _profile_override.duplicate(true)
+	return EnemyProfiles.get_profile(enemy_id)
+
+
+func new_game(starting_player_health: int = STARTING_HEALTH) -> void:
 	draw_pile.clear()
 	discard_pile.clear()
 	player_hand.clear()
 	enemy_hand.clear()
 	events.clear()
-	player_health = STARTING_HEALTH
-	enemy_health = STARTING_HEALTH
+	player_health = clampi(starting_player_health, 1, STARTING_HEALTH)
+	enemy_health = enemy_profile()["health"]
 	completed_rounds = 0
-	phase = "player"
+	phase = PHASE_PLAYER
 	result = ""
 	_player_actions = 1
 	_skip_enemy_uno = false
 	_skip_player_turn = false
 
-	for color in COLORS:
-		for number in range(10):
-			draw_pile.append(_card(color, "number", number))
-		for copy in range(2):
-			draw_pile.append(_card(color, "replay"))
-			draw_pile.append(_card(color, "skip"))
-	for copy in range(4):
-		draw_pile.append(_card("Wild", "wild"))
+	draw_pile = player_deck.make_draw_pile()
 	draw_pile.shuffle()
 	_draw_to(player_hand, STARTING_HAND_SIZE)
 	_draw_to(enemy_hand, STARTING_HAND_SIZE)
 
 	# Start on a number so the first matching decision is easy to read.
-	for index in range(draw_pile.size()):
-		if draw_pile[index]["kind"] == "number":
-			var starter: Dictionary = draw_pile[index]
+	for index: int in range(draw_pile.size()):
+		if draw_pile[index].kind == Card.Kind.NUMBER:
+			var starter: Card = draw_pile[index]
 			draw_pile.remove_at(index)
 			discard_pile.append(starter)
-			active_color = starter["color"]
+			active_color = starter.color
 			break
-	_log("Encounter started. Play a matching card or draw one.")
+	_log("%s encounter started. Play a matching card or draw one." % enemy_profile()["name"])
 
 
-func top_card() -> Dictionary:
-	return discard_pile.back()
+func top_card() -> Card:
+	return discard_pile.back() if not discard_pile.is_empty() else null
 
 
-func card_label(card: Dictionary) -> String:
-	if card["kind"] == "number":
-		return "%s %d" % [card["color"], card["number"]]
-	if card["kind"] == "wild":
-		return "Wild"
-	return "%s %s" % [card["color"], card["kind"].capitalize()]
+func card_label(card: Card) -> String:
+	return card.get_label() if card != null else ""
 
 
-func can_play(card: Dictionary) -> bool:
-	if card["kind"] == "wild":
-		return true
-	var top: Dictionary = top_card()
-	if card["color"] == active_color:
-		return true
-	if card["kind"] == "number" and top["kind"] == "number":
-		return card["number"] == top["number"]
-	return card["kind"] == top["kind"] and card["kind"] != "number"
+func active_color_name() -> String:
+	return Card.color_to_string(active_color)
 
 
-func play_player_card(index: int, wild_color: String = "") -> bool:
-	if phase != "player" or index < 0 or index >= player_hand.size():
+func can_play(card: Card) -> bool:
+	if card == null:
 		return false
-	var card: Dictionary = player_hand[index]
+	return CardSystem.can_play_card(card, top_card(), active_color)
+
+
+func play_player_card(index: int, wild_color: Card.CardColor = Card.CardColor.WILD) -> bool:
+	if phase != PHASE_PLAYER or index < 0 or index >= player_hand.size():
+		return false
+	var card: Card = player_hand[index]
 	if not can_play(card):
 		return false
-	if card["kind"] == "wild" and not COLORS.has(wild_color):
+	if card.kind == Card.Kind.WILD and not COLORS.has(wild_color):
+		return false
+	if card.kind != Card.Kind.WILD and wild_color != Card.CardColor.WILD:
 		return false
 
 	player_hand.remove_at(index)
 	_play_to_discard(card, wild_color)
-	_log("You played %s. Enemy takes %d damage." % [card_label(card), PLAYER_CARD_DAMAGE])
-	enemy_health -= PLAYER_CARD_DAMAGE
+	var damage: int = card.get_damage()
+	var wild_suffix: String = " (%s)" % Card.color_to_string(wild_color) if card.kind == Card.Kind.WILD else ""
+	_log("You played %s%s. Enemy takes %d damage." % [card_label(card), wild_suffix, damage])
+	enemy_health -= damage
 	if _check_outcome():
 		return true
 
-	if card["kind"] == "skip":
+	if card.skips_next_uno:
 		_skip_enemy_uno = true
 		_log("Enemy UNO action will be skipped this round.")
-	elif card["kind"] == "replay":
-		_player_actions += 1
+	if card.extra_actions > 0:
+		_player_actions += card.extra_actions
 		_log("Replay gives you another card action.")
 
 	if player_hand.is_empty():
@@ -131,10 +165,10 @@ func play_player_card(index: int, wild_color: String = "") -> bool:
 
 
 func draw_player_card() -> bool:
-	if phase != "player":
+	if phase != PHASE_PLAYER:
 		return false
 	if _draw_to(player_hand, 1) == 0:
-		_log("No card is available to draw.")
+		_log("No card is available to draw; your turn ends.")
 	else:
 		_log("You drew one card and ended your turn.")
 	_player_actions = 0
@@ -143,60 +177,71 @@ func draw_player_card() -> bool:
 
 
 func _complete_round() -> void:
-	while phase != "finished":
+	# Public player actions are rejected until the entire enemy sequence resolves.
+	phase = PHASE_ENEMY
+	while phase != PHASE_FINISHED:
 		if _skip_enemy_uno:
 			_log("Enemy UNO action skipped.")
 			_skip_enemy_uno = false
 		else:
 			_enemy_uno_action()
-		if phase == "finished":
+		if phase == PHASE_FINISHED:
 			return
 
 		completed_rounds += 1
-		if completed_rounds % ENEMY_ATTACK_INTERVAL == 0:
-			player_health -= ENEMY_ATTACK_DAMAGE
-			_log("Scheduled enemy attack deals %d damage." % ENEMY_ATTACK_DAMAGE)
+		if completed_rounds % enemy_profile()["attack_interval"] == 0:
+			var attack_damage: int = enemy_profile()["attack_damage"]
+			player_health -= attack_damage
+			_log("Scheduled enemy attack deals %d damage." % attack_damage, completed_rounds)
 			if _check_outcome():
 				return
 
 		_player_actions = 1
 		if _skip_player_turn:
 			_skip_player_turn = false
-			_log("Your UNO action is skipped this round.")
+			_log("Your next UNO action was skipped.")
 			continue
-		phase = "player"
+		phase = PHASE_PLAYER
 		return
 
 
 func _enemy_uno_action() -> void:
 	var actions := 1
 	var played := 0
-	while actions > 0 and played < MAX_REPLAY_CHAIN and phase != "finished":
-		var playable_index := -1
-		for index in range(enemy_hand.size()):
-			if can_play(enemy_hand[index]):
-				playable_index = index
-				break
+	while actions > 0 and played < MAX_REPLAY_CHAIN and phase != PHASE_FINISHED:
+		var playable_index: int = EnemyAI.choose_card(enemy_hand, can_play, enemy_profile()["prioritize_actions"])
+		if playable_index < -1 or playable_index >= enemy_hand.size():
+			push_error("Enemy AI selected an invalid card index.")
+			return
 		if playable_index == -1:
 			if _draw_to(enemy_hand, 1) > 0:
 				_log("Enemy drew one card.")
 			else:
 				_log("Enemy could not draw.")
 			return
+		if not can_play(enemy_hand[playable_index]):
+			push_error("Enemy AI selected a card that cannot be played.")
+			return
 
-		var card: Dictionary = enemy_hand[playable_index]
+		var card: Card = enemy_hand[playable_index]
+		var chosen_color: Card.CardColor = Card.CardColor.WILD
+		if card.kind == Card.Kind.WILD:
+			var remaining_hand: Array[Card] = enemy_hand.duplicate()
+			remaining_hand.remove_at(playable_index)
+			chosen_color = EnemyAI.choose_wild_color(remaining_hand)
+			if not COLORS.has(chosen_color):
+				push_error("Enemy AI selected an invalid Wild color.")
+				return
 		enemy_hand.remove_at(playable_index)
-		var chosen_color := ""
-		if card["kind"] == "wild":
-			chosen_color = _enemy_color_choice()
 		_play_to_discard(card, chosen_color)
-		_log("Enemy played %s%s." % [card_label(card), " (" + chosen_color + ")" if chosen_color != "" else ""])
+		var wild_suffix: String = " (%s)" % Card.color_to_string(chosen_color) if card.kind == Card.Kind.WILD else ""
+		_log("Enemy played %s%s." % [card_label(card), wild_suffix])
 		actions -= 1
 		played += 1
-		if card["kind"] == "replay":
-			actions += 1
-		elif card["kind"] == "skip":
+		actions += card.extra_actions
+		if card.skips_next_uno:
 			_skip_player_turn = true
+			_log("Your next UNO action will be skipped.")
 
 		if enemy_hand.is_empty():
 			player_health -= ALL_OUT_DAMAGE
@@ -205,16 +250,18 @@ func _enemy_uno_action() -> void:
 				return
 			_draw_to(enemy_hand, STARTING_HAND_SIZE)
 			_log("Enemy receives a new hand.")
+	if actions > 0 and played >= MAX_REPLAY_CHAIN:
+		_log("Enemy Replay chain ended after %d cards." % MAX_REPLAY_CHAIN)
 
 
-func _play_to_discard(card: Dictionary, wild_color: String) -> void:
+func _play_to_discard(card: Card, wild_color: Card.CardColor) -> void:
 	discard_pile.append(card)
-	active_color = wild_color if card["kind"] == "wild" else card["color"]
+	active_color = wild_color if card.kind == Card.Kind.WILD else card.color
 
 
-func _draw_to(hand: Array[Dictionary], count: int) -> int:
+func _draw_to(hand: Array[Card], count: int) -> int:
 	var drawn := 0
-	for attempt in range(count):
+	for _attempt: int in range(count):
 		if draw_pile.is_empty():
 			_recycle_discard()
 		if draw_pile.is_empty():
@@ -227,7 +274,7 @@ func _draw_to(hand: Array[Dictionary], count: int) -> int:
 func _recycle_discard() -> void:
 	if discard_pile.size() <= 1:
 		return
-	var top: Dictionary = discard_pile.pop_back()
+	var top: Card = discard_pile.pop_back()
 	draw_pile.append_array(discard_pile)
 	discard_pile.clear()
 	discard_pile.append(top)
@@ -235,39 +282,24 @@ func _recycle_discard() -> void:
 	_log("Discard pile shuffled into the draw pile.")
 
 
-func _enemy_color_choice() -> String:
-	var best_color := COLORS[0]
-	var best_count := -1
-	for color in COLORS:
-		var count := 0
-		for card in enemy_hand:
-			if card["color"] == color:
-				count += 1
-		if count > best_count:
-			best_count = count
-			best_color = color
-	return best_color
-
-
 func _check_outcome() -> bool:
+	if phase == PHASE_FINISHED:
+		return true
 	if enemy_health <= 0:
-		phase = "finished"
+		phase = PHASE_FINISHED
 		result = "Victory"
-		_log("Enemy defeated.")
+		_log("VICTORY — Enemy defeated.")
 		return true
 	if player_health <= 0:
-		phase = "finished"
+		phase = PHASE_FINISHED
 		result = "Defeat"
-		_log("You were defeated.")
+		_log("DEFEAT — You were defeated.")
 		return true
 	return false
 
 
-func _log(message: String) -> void:
-	events.push_front(message)
+func _log(message: String, round_number: int = -1) -> void:
+	var logged_round := completed_rounds + 1 if round_number == -1 else round_number
+	events.push_front("Round %d: %s" % [logged_round, message])
 	if events.size() > 10:
 		events.resize(10)
-
-
-func _card(color: String, kind: String, number: int = -1) -> Dictionary:
-	return {"color": color, "kind": kind, "number": number}

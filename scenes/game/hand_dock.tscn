@@ -1,0 +1,62 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/ui/hand_dock.gd" id="1_hand_dock"]
+
+[node name="HandDock" type="VBoxContainer"]
+theme_override_constants/separation = 8
+script = ExtResource("1_hand_dock")
+
+[node name="HandLabel" type="Label" parent="."]
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="HandScroll" type="ScrollContainer" parent="."]
+custom_minimum_size = Vector2(0, 146)
+layout_mode = 2
+horizontal_scroll_mode = 1
+vertical_scroll_mode = 0
+
+[node name="HandHolder" type="CenterContainer" parent="HandScroll"]
+layout_mode = 2
+
+[node name="HandRow" type="HBoxContainer" parent="HandScroll/HandHolder"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ColorCenter" type="CenterContainer" parent="."]
+layout_mode = 2
+
+[node name="ColorRow" type="HBoxContainer" parent="ColorCenter"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Actions" type="HBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="RestartButton" type="Button" parent="Actions"]
+layout_mode = 2
+text = "Restart encounter"
+
+[node name="DeckButton" type="Button" parent="Actions"]
+layout_mode = 2
+text = "Deck (60)"
+
+[node name="ChooseModeButton" type="Button" parent="Actions"]
+layout_mode = 2
+text = "Choose mode"
+
+[node name="Spacer" type="Control" parent="Actions"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NextButton" type="Button" parent="Actions"]
+visible = false
+layout_mode = 2
+text = "Next encounter"
+
+[node name="DrawButton" type="Button" parent="Actions"]
+layout_mode = 2
+text = "Draw 1 and end turn"
