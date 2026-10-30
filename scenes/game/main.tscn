@@ -1,6 +1,15 @@
 [gd_scene format=3 uid="uid://bonoegxk24f46"]
 
 [ext_resource type="Script" uid="uid://d8s0wq4hg6yp" path="res://scripts/game/prototype_ui.gd" id="1_ui"]
+[ext_resource type="PackedScene" path="res://scenes/game/combat_hud.tscn" id="2_combat_hud"]
+[ext_resource type="PackedScene" path="res://scenes/game/enemy_stage.tscn" id="3_enemy_stage"]
+[ext_resource type="PackedScene" path="res://scenes/game/reward_panel.tscn" id="4_reward_panel"]
+[ext_resource type="PackedScene" path="res://scenes/game/action_log_panel.tscn" id="5_action_log"]
+[ext_resource type="PackedScene" path="res://scenes/game/hand_dock.tscn" id="6_hand_dock"]
+[ext_resource type="PackedScene" path="res://scenes/game/selection_view.tscn" id="7_selection_view"]
+[ext_resource type="PackedScene" path="res://scenes/game/deck_dialog.tscn" id="8_deck_dialog"]
+[ext_resource type="PackedScene" path="res://scenes/map/map_view.tscn" id="9_map_view"]
+[ext_resource type="PackedScene" path="res://scenes/run/node_interaction_view.tscn" id="10_interaction_view"]
 
 [node name="main" type="Control" unique_id=1312160044]
 layout_mode = 3
@@ -10,3 +19,69 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_ui")
+
+[node name="CombatView" type="MarginContainer" parent="." unique_id=43432772]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 18
+
+[node name="Column" type="VBoxContainer" parent="CombatView" unique_id=1014818568]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="CombatHUD" parent="CombatView/Column" unique_id=344556726 instance=ExtResource("2_combat_hud")]
+layout_mode = 2
+
+[node name="Content" type="VBoxContainer" parent="CombatView/Column" unique_id=1045907464]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="BattleRow" type="HBoxContainer" parent="CombatView/Column/Content" unique_id=1563724014]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SideSpacer" type="Control" parent="CombatView/Column/Content/BattleRow" unique_id=634431847]
+custom_minimum_size = Vector2(270, 0)
+layout_mode = 2
+
+[node name="Stage" type="CenterContainer" parent="CombatView/Column/Content/BattleRow" unique_id=1859791272]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="EnemyStack" type="VBoxContainer" parent="CombatView/Column/Content/BattleRow/Stage" unique_id=495465855]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="EnemyStage" parent="CombatView/Column/Content/BattleRow/Stage/EnemyStack" unique_id=1620159224 instance=ExtResource("3_enemy_stage")]
+layout_mode = 2
+
+[node name="RewardContainer" parent="CombatView/Column/Content/BattleRow/Stage/EnemyStack" unique_id=186495368 instance=ExtResource("4_reward_panel")]
+layout_mode = 2
+
+[node name="ActionLog" parent="CombatView/Column/Content/BattleRow" unique_id=881080800 instance=ExtResource("5_action_log")]
+layout_mode = 2
+
+[node name="HandDock" parent="CombatView/Column" unique_id=1508475852 instance=ExtResource("6_hand_dock")]
+layout_mode = 2
+
+[node name="EncounterSelection" parent="." unique_id=1203280742 instance=ExtResource("7_selection_view")]
+layout_mode = 1
+
+[node name="MapView" parent="." unique_id=1901283912 instance=ExtResource("9_map_view")]
+visible = false
+layout_mode = 1
+
+[node name="NodeInteractionView" parent="." unique_id=1901283913 instance=ExtResource("10_interaction_view")]
+visible = false
+layout_mode = 1
+
+[node name="DeckDialog" parent="." unique_id=115926313 instance=ExtResource("8_deck_dialog")]

@@ -1,0 +1,18 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/ui/reward_panel.gd" id="1_reward_panel"]
+
+[node name="RewardContainer" type="VBoxContainer"]
+visible = false
+theme_override_constants/separation = 6
+script = ExtResource("1_reward_panel")
+
+[node name="RewardTitle" type="Label" parent="."]
+layout_mode = 2
+text = "Victory Reward — Choose 1 card to add to your deck (or Skip):"
+horizontal_alignment = 1
+
+[node name="RewardRow" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1

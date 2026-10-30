@@ -8,6 +8,7 @@ enum CardColor {
 	GREEN,
 	BLUE,
 	WILD,
+	BLANK,
 }
 
 enum Kind {
@@ -93,5 +94,7 @@ static func color_to_string(c: CardColor) -> String:
 			return "Blue"
 		CardColor.WILD:
 			return "Wild"
+		CardColor.BLANK:
+			return "Blank"
 		_:
 			return "Unknown"

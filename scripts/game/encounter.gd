@@ -6,9 +6,10 @@ const EnemyAI = preload("res://scripts/game/enemy_ai.gd")
 const EnemyProfiles = preload("res://scripts/game/enemy_profiles.gd")
 const EnemyState = preload("res://scripts/game/enemy_state.gd")
 const PlayerDeck = preload("res://scripts/game/player_deck.gd")
+const EncounterDataScript = preload("res://scripts/content/encounter_data.gd")
 
 const COLORS: Array[Card.CardColor] = CardSystem.STANDARD_COLORS
-const STARTING_HEALTH := 8
+const STARTING_HEALTH := 20
 const STARTING_HAND_SIZE := 5
 const ALL_OUT_DAMAGE := 3
 const MAX_REPLAY_CHAIN := 8
@@ -40,6 +41,7 @@ var enemy_id: String:
 var _player_actions := 1
 var _skip_enemy_uno := false
 var _skip_player_turn := false
+var _profile_override: Dictionary = {}
 
 
 func _init() -> void:
@@ -51,12 +53,24 @@ func _init() -> void:
 func start_encounter(id: String, starting_player_health: int = STARTING_HEALTH) -> bool:
 	if not EnemyProfiles.is_valid(id):
 		return false
+	_profile_override.clear()
 	enemy_id = id
 	new_game(starting_player_health)
 	return true
 
 
+func start_encounter_from_data(encounter_data: EncounterDataScript, starting_player_health: int = STARTING_HEALTH) -> bool:
+	if encounter_data == null or not encounter_data.is_valid():
+		return false
+	enemy_id = encounter_data.enemy_profile_id
+	_profile_override = encounter_data.resolve_enemy_profile()
+	new_game(starting_player_health)
+	return true
+
+
 func enemy_profile() -> Dictionary:
+	if not _profile_override.is_empty() and _profile_override.get("id", enemy_id) == enemy_id:
+		return _profile_override.duplicate(true)
 	return EnemyProfiles.get_profile(enemy_id)
 
 
