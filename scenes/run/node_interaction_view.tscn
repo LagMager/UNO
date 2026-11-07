@@ -25,7 +25,6 @@ script = ExtResource("1_interaction_view")
 [node name="Panel" type="PanelContainer" parent="."]
 custom_minimum_size = Vector2(460, 0)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 
 [node name="Margin" type="MarginContainer" parent="Panel"]
 layout_mode = 2
@@ -46,6 +45,7 @@ text = "INTERACTION"
 horizontal_alignment = 1
 
 [node name="TitleLabel" type="Label" parent="Panel/Margin/Column"]
+theme_type_variation = &"HeaderLabel"
 layout_mode = 2
 theme_override_font_sizes/font_size = 22
 text = "Title"

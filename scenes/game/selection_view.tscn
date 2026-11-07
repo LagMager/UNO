@@ -25,7 +25,6 @@ script = ExtResource("1_selection_view")
 [node name="Panel" type="PanelContainer" parent="."]
 custom_minimum_size = Vector2(390, 0)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 
 [node name="Padding" type="MarginContainer" parent="Panel"]
 layout_mode = 2
@@ -39,6 +38,7 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Prompt" type="Label" parent="Panel/Padding/Choices"]
+theme_type_variation = &"HeaderLabel"
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "Choose a combat test"

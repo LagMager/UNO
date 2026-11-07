@@ -7,6 +7,7 @@ theme_override_constants/separation = 4
 script = ExtResource("1_combat_hud")
 
 [node name="StatusLabel" type="Label" parent="."]
+theme_type_variation = &"HeaderLabel"
 layout_mode = 2
 theme_override_font_sizes/font_size = 19
 

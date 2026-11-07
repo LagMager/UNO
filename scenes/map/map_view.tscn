@@ -36,6 +36,7 @@ layout_mode = 2
 theme_override_constants/separation = 16
 
 [node name="TitleLabel" type="Label" parent="Column/Header"]
+theme_type_variation = &"HeaderLabel"
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "Expedition Map"
@@ -59,7 +60,6 @@ text = "Select a highlighted node to advance"
 [node name="MapPanel" type="PanelContainer" parent="Column"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_styles/panel = SubResource("StyleBoxFlat_map_panel")
 
 [node name="ScrollContainer" type="ScrollContainer" parent="Column/MapPanel"]
 layout_mode = 2

@@ -16,7 +16,6 @@ corner_radius_bottom_left = 5
 
 [node name="ActionLog" type="PanelContainer"]
 custom_minimum_size = Vector2(270, 130)
-theme_override_styles/panel = SubResource("StyleBoxFlat_log_panel")
 script = ExtResource("1_action_log_panel")
 
 [node name="LogMargin" type="MarginContainer" parent="."]
@@ -31,6 +30,7 @@ layout_mode = 2
 theme_override_constants/separation = 6
 
 [node name="HistoryTitle" type="Label" parent="LogMargin/LogColumn"]
+theme_type_variation = &"HeaderLabel"
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "Recent actions"
