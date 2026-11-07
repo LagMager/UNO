@@ -20,14 +20,26 @@ const SelectionViewScript = preload("res://scripts/game/ui/selection_view.gd")
 const MapViewScript = preload("res://scripts/map/ui/map_view.gd")
 const NodeInteractionViewScript = preload("res://scripts/run/ui/node_interaction_view.gd")
 const DeckDialogScript = preload("res://scripts/game/ui/deck_dialog.gd")
+const MenuBackdropScript = preload("res://scripts/menu/menu_backdrop.gd")
+const TableStageScript = preload("res://scripts/game/ui/table_stage.gd")
+const WildPickerScript = preload("res://scripts/game/ui/wild_picker.gd")
+const ShopScreenScript = preload("res://scripts/run/ui/shop_screen.gd")
+## Gold and health for a shop opened from the menu (just to look around).
+const PREVIEW_GOLD := 100
+const PREVIEW_WOUNDS := 6
 
 var run_session: RefCounted
 var run_controller: RunControllerScript
 var decision_runner_factory: Callable = Callable()
+var shop_screen: ShopScreenScript
+var _shop_preview := false
 var encounter: RefCounted:
 	get:
 		return run_session.encounter if run_session != null else null
 
+@onready var backdrop: TextureRect = $Backdrop
+@onready var menu_backdrop: MenuBackdropScript = $MenuBackdrop
+@onready var table_stage: TableStageScript = $TableStage
 @onready var combat_view: MarginContainer = $CombatView
 @onready var combat_hud: CombatHUDScript = $CombatView/Column/CombatHUD
 @onready var content: VBoxContainer = $CombatView/Column/Content
@@ -50,10 +62,29 @@ func _ready() -> void:
 	render()
 	show_selection()
 	get_viewport().size_changed.connect(update_layout)
+	# The old gray enemy box stays for layout and tests; the rival is now drawn at the table.
+	enemy_stage.modulate.a = 0.0
+	table_stage.hand_row = hand_dock.hand_row
+	table_stage.busy_changed.connect(hand_dock.set_locked)
+	var picker := WildPickerScript.new()
+	picker.duel = table_stage.duel
+	add_child(picker)
+	hand_dock.wild_requested.connect(picker.open)
+	picker.color_chosen.connect(hand_dock.choose_wild_color)
+	picker.cancelled.connect(hand_dock.cancel_wild)
+	# the arms already show the hand; the label only covered the table
+	hand_dock.hand_label.visible = false
+	shop_screen = ShopScreenScript.new()
+	shop_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shop_screen.visible = false
+	add_child(shop_screen)
+	move_child(shop_screen, interaction_view.get_index() + 1)
+	selection_view.shop_requested.connect(open_shop_preview)
 	update_layout()
 
 
 func show_selection() -> void:
+	_set_scenery("menu")
 	enemy_stage.clear_hit_effects()
 	combat_view.visible = false
 	map_view.visible = false
@@ -101,8 +132,15 @@ func restart_encounter() -> void:
 
 func play_card(index: int, wild_color: Card.CardColor = Card.CardColor.WILD) -> void:
 	var previous_health: int = encounter.enemy_health
+	var before: Dictionary = table_stage.snapshot(encounter)
+	var played: Card = encounter.player_hand[index] if index >= 0 and index < encounter.player_hand.size() else null
+	var from_rect := Rect2()
+	if index >= 0 and index < hand_dock.hand_row.get_child_count():
+		var button: Control = hand_dock.hand_row.get_child(index)
+		from_rect = Rect2(button.global_position - table_stage.global_position, button.size)
 	if encounter.play_player_card(index, wild_color):
 		render()
+		table_stage.play_round(before, encounter, played, from_rect, false)
 		var damage: int = maxi(previous_health - encounter.enemy_health, 0)
 		if damage > 0:
 			enemy_stage.show_hit(damage)
@@ -110,8 +148,10 @@ func play_card(index: int, wild_color: Card.CardColor = Card.CardColor.WILD) -> 
 
 
 func draw_card() -> void:
+	var before: Dictionary = table_stage.snapshot(encounter)
 	if encounter.draw_player_card():
 		render()
+		table_stage.play_round(before, encounter, null, Rect2(), true)
 		_sync_map_defeat_if_needed()
 
 
@@ -139,6 +179,7 @@ func render() -> void:
 	reward_panel.render_rewards(run_session)
 	action_log_panel.render_log(encounter)
 	hand_dock.render_dock(run_session)
+	table_stage.sync_now(encounter)
 	update_layout()
 
 
@@ -155,6 +196,8 @@ func update_layout() -> void:
 
 
 func _open_combat() -> void:
+	_set_scenery("table")
+	table_stage.new_encounter(encounter)
 	enemy_stage.clear_hit_effects()
 	selection_view.visible = false
 	map_view.visible = false
@@ -164,6 +207,7 @@ func _open_combat() -> void:
 
 
 func _show_map(_state: RunStateScript = null) -> void:
+	_set_scenery("map")
 	enemy_stage.clear_hit_effects()
 	selection_view.visible = false
 	combat_view.visible = false
@@ -178,6 +222,7 @@ func _on_map_combat_requested(_node: MapNodeDataScript, encounter_data: Encounte
 
 
 func _on_map_decision_requested(_node: MapNodeDataScript, decision_data: DecisionDataScript) -> void:
+	_set_scenery("saloon")
 	selection_view.visible = false
 	combat_view.visible = false
 	map_view.visible = false
@@ -191,14 +236,31 @@ func _on_map_decision_requested(_node: MapNodeDataScript, decision_data: Decisio
 
 
 func _on_map_shop_requested(_node: MapNodeDataScript, shop_data: ShopDataScript) -> void:
+	_open_shop(run_controller.run_state, shop_data)
+
+
+## The shop from the main menu: a throwaway purse, so every item can be tried.
+func open_shop_preview() -> void:
+	_shop_preview = true
+	var state := RunStateScript.new()
+	state.gold = PREVIEW_GOLD
+	state.current_health = maxi(state.max_health - PREVIEW_WOUNDS, 1)
+	_open_shop(state, ShopDataScript.new())
+
+
+func _open_shop(state: RunStateScript, shop_data: ShopDataScript) -> void:
+	_set_scenery("shop")
 	selection_view.visible = false
 	combat_view.visible = false
 	map_view.visible = false
 	interaction_view.visible = true
-	interaction_view.open_shop(run_controller.run_state, shop_data)
+	interaction_view.open_shop(state, shop_data)
+	if shop_screen != null:
+		shop_screen.open(interaction_view)
 
 
 func _on_map_safe_room_requested(_node: MapNodeDataScript, rest_data: RestSiteDataScript) -> void:
+	_set_scenery("saloon")
 	selection_view.visible = false
 	combat_view.visible = false
 	map_view.visible = false
@@ -207,6 +269,12 @@ func _on_map_safe_room_requested(_node: MapNodeDataScript, rest_data: RestSiteDa
 
 
 func _on_interaction_finished(pending_encounter: EncounterDataScript) -> void:
+	if shop_screen != null:
+		shop_screen.close()
+	if _shop_preview:
+		_shop_preview = false
+		show_selection()
+		return
 	run_controller.complete_non_combat_interaction(pending_encounter)
 
 
@@ -239,3 +307,14 @@ func _connect_signals() -> void:
 	run_controller.shop_requested.connect(_on_map_shop_requested)
 	run_controller.safe_room_requested.connect(_on_map_safe_room_requested)
 	interaction_view.interaction_finished.connect(_on_interaction_finished)
+
+
+func _set_scenery(kind: String) -> void:
+	backdrop.visible = kind == "saloon"
+	table_stage.visible = kind == "table"
+	menu_backdrop.visible = kind in ["menu", "map"]
+	# the shop is its own 3D room; the gray panel only keeps the shop's rules
+	interaction_view.get_node("Panel").visible = kind != "shop"
+	if shop_screen != null:
+		shop_screen.visible = kind == "shop"
+	menu_backdrop.speed_scale = 1.0 if kind == "menu" else 0.35

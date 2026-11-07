@@ -10,6 +10,10 @@
 [ext_resource type="PackedScene" path="res://scenes/game/deck_dialog.tscn" id="8_deck_dialog"]
 [ext_resource type="PackedScene" path="res://scenes/map/map_view.tscn" id="9_map_view"]
 [ext_resource type="PackedScene" path="res://scenes/run/node_interaction_view.tscn" id="10_interaction_view"]
+[ext_resource type="Theme" path="res://resources/themes/western_theme.tres" id="11_theme"]
+[ext_resource type="Texture2D" path="res://assets/backgrounds/saloon_lit.jpg" id="12_saloon"]
+[ext_resource type="Script" path="res://scripts/menu/menu_backdrop.gd" id="13_menu_backdrop"]
+[ext_resource type="Script" path="res://scripts/game/ui/table_stage.gd" id="14_table_stage"]
 
 [node name="main" type="Control" unique_id=1312160044]
 layout_mode = 3
@@ -18,7 +22,51 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+theme = ExtResource("11_theme")
 script = ExtResource("1_ui")
+
+[node name="Backdrop" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("12_saloon")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Shade" type="ColorRect" parent="Backdrop"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.08, 0.05, 0.03, 0.12)
+
+[node name="MenuBackdrop" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("13_menu_backdrop")
+
+[node name="TableStage" type="Control" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("14_table_stage")
 
 [node name="CombatView" type="MarginContainer" parent="." unique_id=43432772]
 layout_mode = 1
