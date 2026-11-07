@@ -4,6 +4,8 @@ extends CenterContainer
 signal single_encounter_requested(enemy_id: String)
 signal run_requested
 signal map_run_requested
+## Open the shop on its own, just to look around and try it.
+signal shop_requested
 
 const EnemyProfiles = preload("res://scripts/game/enemy_profiles.gd")
 
@@ -11,6 +13,7 @@ const EnemyProfiles = preload("res://scripts/game/enemy_profiles.gd")
 @onready var enemy_choices: VBoxContainer = $Panel/Padding/Choices/EnemyChoices
 @onready var run_button: Button = $Panel/Padding/Choices/ThreeEncounters
 @onready var map_run_button: Button = $Panel/Padding/Choices/MapExpedition
+@onready var shop_button: Button = get_node_or_null("Panel/Padding/Choices/VisitShop")
 
 
 func _ready() -> void:
@@ -18,6 +21,8 @@ func _ready() -> void:
 	run_button.pressed.connect(func() -> void: run_requested.emit())
 	if map_run_button != null:
 		map_run_button.pressed.connect(func() -> void: map_run_requested.emit())
+	if shop_button != null:
+		shop_button.pressed.connect(func() -> void: shop_requested.emit())
 	_populate_enemy_choices()
 
 

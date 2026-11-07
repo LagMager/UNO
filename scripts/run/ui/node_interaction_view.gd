@@ -6,6 +6,8 @@ extends CenterContainer
 ## interaction_finished when the player completes the node.
 
 signal interaction_finished(pending_encounter: EncounterData)
+## The shop's stock, gold or health changed (a purchase was made).
+signal shop_changed
 
 const RewardSystem = preload("res://scripts/game/reward_system.gd")
 
@@ -112,6 +114,26 @@ func open_decision(run_state: RunState, decision_data: DecisionData, runner: Ref
 	_clear_options()
 
 
+func is_shop_open() -> bool:
+	return _active_shop_data != null
+
+
+func get_shop_data() -> ShopData:
+	return _active_shop_data
+
+
+func get_shop_cards() -> Array[Card]:
+	return _shop_cards
+
+
+func is_shop_card_sold(index: int) -> bool:
+	return _shop_purchased_indices.has(index)
+
+
+func get_run_state() -> RunState:
+	return _run_state
+
+
 func select_option_index(index: int) -> bool:
 	if index < 0 or index >= options_container.get_child_count():
 		return false
@@ -190,6 +212,7 @@ func _render_shop_options(data: ShopData) -> void:
 		heal_btn.disabled = not _run_state.can_afford(data.heal_price) or _run_state.current_health >= _run_state.max_health
 		heal_btn.pressed.connect(_on_shop_heal)
 		options_container.add_child(heal_btn)
+	shop_changed.emit()
 
 
 func _on_shop_buy_card(index: int) -> void:
