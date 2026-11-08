@@ -15,7 +15,6 @@ const RIVAL_SCENE := preload("res://assets/models/rival.glb")
 ## Who sits across the table, by kind (see set_rival).
 const RIVALS := {
 	"tahur": preload("res://assets/models/rival.glb"),
-	"matasanos": preload("res://assets/models/matasanos.glb"),
 	"gila": preload("res://assets/models/yorkie.glb"),
 }
 const TABLE_SCENE := preload("res://assets/models/table_set.glb")
@@ -347,16 +346,13 @@ func set_rival(kind: String) -> void:
 		_tail_light.spot_angle_attenuation = 1.4
 		_world.add_child(_tail_light)
 		_tail_light.look_at_from_position(Vector3(-0.15, 1.3, 0.55), Vector3(-0.57, 0.78, -0.42))
-	_build_glints()
 	_build_lizard_eyes()
 	var smokes := kind == "tahur"
 	if smokes:
 		fidgets = FIDGETS
-	elif kind == "gila":
-		# a predator: long stares, the tail doing the talking
-		fidgets = ["tail_curl", "stare", "check", "impatient", "knuckles", "neck", "lean", "tail_curl", "stare"]
 	else:
-		fidgets = ["glasses", "check", "stare", "impatient", "knuckles", "neck", "lean", "glasses", "check"]
+		# the Gila, a predator: long stares, the tail doing the talking
+		fidgets = ["tail_curl", "stare", "check", "impatient", "knuckles", "neck", "lean", "tail_curl", "stare"]
 	if _smoke != null:
 		_smoke.visible = smokes
 		_smoke.emitting = smokes
@@ -481,7 +477,6 @@ func _process(delta: float) -> void:
 	_update_lamp(delta)
 	_update_wild(delta)
 	_update_fx(delta)
-	_update_glints(delta)
 	_update_lizard_eyes(delta)
 	if _smoke != null and _smoke.visible:
 		var head := _skeleton.find_bone("head")
@@ -1227,98 +1222,6 @@ func attack_caption(damage: int) -> String:
 func _twirl_later() -> void:
 	await _at(_ev("shoot", "holster"))
 	_gun_mode = 0
-
-
-# ------------------------------------------------------------------ the doctor's glasses
-## He has no eyes to act with: the reflection on his smoked lenses does it. A faint
-## lamp reflection that slides across the glass now and then; a hard flash when he
-## turns cold (squints: aims, taunts, wins); a flicker when he gets hurt (wide).
-## Lens centers in the world with his idle pose at its first frame (measured in Blender).
-const LENSES := [Vector3(-0.042, 1.107, 0.156), Vector3(0.041, 1.103, 0.16)]
-const GLINT_SPOT := Vector3(-0.004, 0.018, 0.002)   # where the lamp catches the glass: high, toward the light
-var _glints: Array[MeshInstance3D] = []
-var _glint_root: Node3D
-var _glint_local := Transform3D.IDENTITY
-var _glint_sweep := -1.0
-var _glint_wait := 4.0
-
-
-func _build_glints() -> void:
-	if _glint_root != null:
-		_glint_root.get_parent().queue_free()
-		_glint_root = null
-	_glints.clear()
-	if rival_kind != "matasanos":
-		return
-	var head := _skeleton.find_bone("head")
-	# anchor them to the head as it is at the first frame of his idle
-	_anim.play(_anim_name("idle"), 0.0)
-	_anim.seek(0.0, true)
-	_glint_local = (_skeleton.global_transform * _skeleton.get_bone_global_pose(head)).affine_inverse()
-	# hung from the head bone itself, so they follow the head tics too
-	var attach := BoneAttachment3D.new()
-	attach.bone_name = "head"
-	_skeleton.add_child(attach)
-	_glint_root = Node3D.new()
-	attach.add_child(_glint_root)
-	_glint_root.transform = _glint_local
-	for at: Vector3 in LENSES:
-		var mi := MeshInstance3D.new()
-		var q := QuadMesh.new()
-		q.size = Vector2(0.013, 0.013)   # a soft, round reflection
-		mi.mesh = q
-		var m := StandardMaterial3D.new()
-		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m.albedo_color = Color(1.0, 0.95, 0.85, 0.0)
-		m.emission_enabled = true
-		m.emission = Color(1.0, 0.9, 0.75)
-		var dot := GradientTexture2D.new()
-		dot.fill = GradientTexture2D.FILL_RADIAL
-		dot.fill_from = Vector2(0.5, 0.5)
-		dot.fill_to = Vector2(1.0, 0.5)
-		var g := Gradient.new()
-		g.set_color(0, Color(1, 1, 1, 1))
-		g.set_color(1, Color(1, 1, 1, 0))
-		dot.gradient = g
-		m.albedo_texture = dot
-		mi.material_override = m
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.position = at + GLINT_SPOT
-		_glint_root.add_child(mi)
-		_glints.append(mi)
-
-
-func _update_glints(delta: float) -> void:
-	if _glint_root == null:
-		return
-	# now and then the lamp's reflection slides across the lenses
-	_glint_wait -= delta
-	if _glint_wait <= 0.0 and _glint_sweep < 0.0:
-		_glint_sweep = 0.0
-		_glint_wait = _rng.randf_range(3.0, 8.0)
-	var sweep := 0.0
-	var slide := 0.0
-	if _glint_sweep >= 0.0:
-		_glint_sweep += delta / 0.5
-		sweep = sin(clampf(_glint_sweep, 0.0, 1.0) * PI)
-		slide = lerpf(-0.012, 0.012, clampf(_glint_sweep, 0.0, 1.0))
-		if _glint_sweep >= 1.0:
-			_glint_sweep = -1.0
-	var cold := clampf((1.0 - _eye_open) * 2.0, 0.0, 1.0)   # squint = he means it
-	var shaken := clampf((_eye_open - 1.0) * 2.0, 0.0, 1.0)  # wide = it hurt
-	var level := 0.18 + sweep * 0.6 + cold * 1.4
-	if shaken > 0.0 and _rng.randf() < 0.5:
-		level = _rng.randf_range(0.0, 0.3)
-	for i: int in range(_glints.size()):
-		var g := _glints[i]
-		var m := g.material_override as StandardMaterial3D
-		m.albedo_color.a = clampf(level, 0.0, 1.0)
-		m.emission_energy_multiplier = level * 3.0
-		g.position = LENSES[i] + GLINT_SPOT + Vector3(slide, -slide * 0.5, 0.0)
-		# while the reflection slides across it stretches into a streak
-		g.scale = Vector3(1.0 + sweep * 1.4 + cold * 0.4, 1.0 - sweep * 0.4 + cold * 0.4, 1.0)
-		g.rotation.z = 0.5 * sweep
 
 
 # ------------------------------------------------------------------ the Gila's eyes
