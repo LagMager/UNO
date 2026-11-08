@@ -15,7 +15,6 @@ const RIVAL_SCENE := preload("res://assets/models/rival.glb")
 ## Who sits across the table, by kind (see set_rival).
 const RIVALS := {
 	"tahur": preload("res://assets/models/rival.glb"),
-	"tuerto": preload("res://assets/models/el_tuerto.glb"),
 	"matasanos": preload("res://assets/models/matasanos.glb"),
 	"gila": preload("res://assets/models/yorkie.glb"),
 }
@@ -44,14 +43,12 @@ const EVENTS := {
 	"smoke": {"exhale": 33.0 / 30.0},
 	"play_toss": {"grab": 5.0 / 30.0, "release": 16.0 / 30.0},
 	"play_place": {"grab": 7.0 / 30.0, "release": 31.0 / 30.0},
-	"hurl": {"grab": 24.0 / 30.0, "release": 44.0 / 30.0},
 }
-## El Tuerto's own clips (Mixamo rig): the hands arrive a few frames later.
-const EVENTS_TUERTO := {
+## The Mixamo rivals' own clips: the hands arrive a few frames later.
+const EVENTS_MIXAMO := {
 	"play_toss": {"grab": 8.0 / 30.0, "release": 19.0 / 30.0},
 	"play_place": {"grab": 10.0 / 30.0, "release": 34.0 / 30.0},
 	"draw": {"grab": 14.0 / 30.0, "tuck": 37.0 / 30.0},
-	"hurl": {"grab": 27.0 / 30.0, "release": 47.0 / 30.0},
 	"play_free": {"grab": 17.0 / 30.0, "release": 27.0 / 30.0},
 	"play_free_place": {"grab": 17.0 / 30.0, "release": 36.0 / 30.0},
 	"shoot": {"draw": 17.0 / 30.0, "fire": 33.0 / 30.0, "twirl": 61.0 / 30.0, "twirl_end": 62.0 / 30.0, "holster": 63.0 / 30.0},
@@ -305,24 +302,20 @@ func _build_table() -> void:
 
 
 var rival_kind := "tahur"
-var _grip_extra := 0.0   # big fists: cards sit further out of the hand
-var _heavy := false      # the brute: everything slower and with weight
-var _mixamo := false     # rigged in Mixamo with our own clips (Tuerto, Matasanos): one-hand plays, own timings
+var _mixamo := false     # rigged in Mixamo with our own clips: one-hand plays, own timings
 var _fist_reach := 0.11  # wrist to the middle of the closed hand
 var _brute_light: SpotLight3D   # his skin is charcoal: a low warm light from the front keeps him readable
 var _tail_light: SpotLight3D    # the Gila's tail, beside the chair
 
 
-## Changes who sits across the table: "tahur" (the cold card sharp, smokes) or
-## "tuerto" (the one-eyed brute). Same skeleton and clips, so everything else works.
+## Changes who sits across the table (see RIVALS): "tahur" (the cold card sharp, smokes)
+## or one of the Mixamo-rigged rivals.
 func set_rival(kind: String) -> void:
 	if not RIVALS.has(kind) or kind == rival_kind:
 		return
 	rival_kind = kind
-	_grip_extra = 0.06 if kind == "tuerto" else 0.0
-	_heavy = kind == "tuerto"
 	_mixamo = kind != "tahur"
-	_fist_reach = 0.11 if kind == "tuerto" else 0.06
+	_fist_reach = 0.06
 	_gun_scale = 0.8 if kind == "gila" else 0.75   # Gila: 29 cm (it was 36, too big)
 	if _rival != null:
 		_world.remove_child(_rival)
@@ -334,7 +327,7 @@ func set_rival(kind: String) -> void:
 	if _mixamo:
 		_brute_light = SpotLight3D.new()
 		_brute_light.light_color = Color("#ffd2a0")
-		_brute_light.light_energy = 1.6 if _heavy else (1.0 if kind == "gila" else 0.7)
+		_brute_light.light_energy = 1.0 if kind == "gila" else 0.7
 		_brute_light.spot_range = 2.6
 		_brute_light.spot_angle = 24.0
 		_brute_light.spot_angle_attenuation = 1.2
@@ -359,8 +352,6 @@ func set_rival(kind: String) -> void:
 	var smokes := kind == "tahur"
 	if smokes:
 		fidgets = FIDGETS
-	elif kind == "tuerto":
-		fidgets = ["scratch", "knuckles", "neck", "lean", "check", "stare", "impatient", "scratch", "knuckles"]
 	elif kind == "gila":
 		# a predator: long stares, the tail doing the talking
 		fidgets = ["tail_curl", "stare", "check", "impatient", "knuckles", "neck", "lean", "tail_curl", "stare"]
@@ -377,12 +368,6 @@ var _tics: SkeletonModifier3D
 func _build_rival() -> void:
 	_rival = (RIVALS[rival_kind] as PackedScene).instantiate()
 	_world.add_child(_rival)
-	if rival_kind == "tuerto":
-		# a bit smaller, scaled from the table top so his hands stay on it
-		var s := 0.78
-		var pivot := Vector3(0.0, TABLE_TOP, -0.22)
-		_rival.scale = Vector3.ONE * s
-		_rival.position = pivot * (1.0 - s)
 	_stylize(_rival, 0.006)
 	_skeleton = _rival.find_children("*", "Skeleton3D", true, false)[0]
 	_anim = _rival.find_children("*", "AnimationPlayer", true, false)[0]
@@ -476,10 +461,7 @@ func _update_tempo(delta: float) -> void:
 	if _speed_wait <= 0.0:
 		_speed_wait = _rng.randf_range(0.12, 0.45)
 		var r := _rng.randf()
-		if _heavy:
-			# a heavy man: slow, no quick beats, only a slow drag now and then
-			_speed_target = _rng.randf_range(0.55, 0.65) if r < 0.25 else _rng.randf_range(0.7, 0.8)
-		elif r < 0.16:
+		if r < 0.16:
 			_speed_target = _rng.randf_range(1.25, 1.45)  # a quicker beat
 		elif r < 0.28:
 			_speed_target = _rng.randf_range(0.5, 0.7)    # slows for a beat
@@ -533,8 +515,8 @@ func _fist_center(bone: String) -> Vector3:
 
 
 func _ev(clip: String, key: String) -> float:
-	if _mixamo and EVENTS_TUERTO.has(clip):
-		return EVENTS_TUERTO[clip][key]
+	if _mixamo and EVENTS_MIXAMO.has(clip):
+		return EVENTS_MIXAMO[clip][key]
 	return EVENTS[clip][key]
 
 
@@ -549,7 +531,7 @@ func _pinch(side: String) -> Vector3:
 		# long lizard fingers: the card is held between the very tips (measured in
 		# Blender: thumb tip against the index tip, ~1 cm, right on the deck card)
 		return (_bone_pos("thumb4." + side) + _bone_pos("index4." + side)) * 0.5
-	if not _heavy and _skeleton.find_bone("index2." + side) >= 0:
+	if _skeleton.find_bone("index2." + side) >= 0:
 		return (_bone_pos("thumb3." + side) + _bone_pos("index2." + side)) * 0.5
 	return _fist_center("hand." + side)
 
@@ -562,12 +544,12 @@ func _fist_grip(side: String) -> Vector3:
 
 func _place_props() -> void:
 	# fan of cards in the rival's left hand (screen left): we see the backs
-	var fan_at := _bone_pos("hand.R") + Vector3(0, _grip_extra, 0.02 + _grip_extra * 0.5)
+	var fan_at := _bone_pos("hand.R") + Vector3(0, 0, 0.02)
 	if _mixamo:
 		# the fan comes out of the middle of the fist, its bottom hidden
 		# behind the knuckles (so it reads as held, not stuck on)
 		fan_at = _fist_center("hand.R") + Vector3(-0.03, 0.035, 0.0)
-		if _skeleton.find_bone("index2.R") >= 0 and not _heavy:
+		if _skeleton.find_bone("index2.R") >= 0:
 			# real fingers: the cards sit in the pinch between thumb tip and index,
 			# a little behind the fingers so they wrap the bottom edge
 			var pinch := _pinch("R")
@@ -581,15 +563,15 @@ func _place_props() -> void:
 			var fing := (_bone_pos("index2.R") + _bone_pos("index3.R") + _bone_pos("middle2.R")) / 3.0
 			var tc := (CAMERA_AT - web).normalized()
 			fan_at = web + tc * ((fing + _bone_pos("thumb4.R")) * 0.5 - web).dot(tc)
-	# the brute holds his fan tipped out to his side, away from his face
-	_fan.global_transform = Transform3D(_facing_camera(fan_at).rotated(Vector3.FORWARD, -0.55 if _heavy else (-0.3 if _mixamo else 0.0)), fan_at)
+	# the Mixamo rivals hold the fan tipped out to their side, away from the face
+	_fan.global_transform = Transform3D(_facing_camera(fan_at).rotated(Vector3.FORWARD, -0.3 if _mixamo else 0.0), fan_at)
 	var n := _fan.get_child_count()
 	for i: int in range(n):
 		var c := _fan.get_child(i) as Node3D
 		var u := 0.0 if n == 1 else float(i) / (n - 1) - 0.5
 		c.rotation = Vector3(0, 0, -u * 0.9)
 		c.scale = Vector3.ONE * 0.8
-		c.position = Vector3(0, 0, 0.0015 * i).rotated(Vector3.FORWARD, -u * 0.9) + Vector3(0, CARD_SIZE.y * (0.42 if _mixamo and not _heavy else 0.38), 0).rotated(Vector3.FORWARD, -u * 0.9)
+		c.position = Vector3(0, 0, 0.0015 * i).rotated(Vector3.FORWARD, -u * 0.9) + Vector3(0, CARD_SIZE.y * (0.42 if _mixamo else 0.38), 0).rotated(Vector3.FORWARD, -u * 0.9)
 	var hand := _bone_pos("hand." + _held_side)
 	_hand_vel = _hand_vel.lerp((hand - _last_hand) / _dt, 1.0 - exp(-_dt * 14.0))
 	_last_hand = hand
@@ -605,7 +587,7 @@ func _place_props() -> void:
 			# The clip aims the hand; measured in Blender (gila_probe.py)
 			_gun.global_transform = _gun_grip(side)
 			_flash.position = _gun.global_transform * GUN_MUZZLE
-		elif not _heavy and _skeleton.find_bone("index1." + side) >= 0:
+		elif _skeleton.find_bone("index1." + side) >= 0:
 			# gripped like a real revolver: the barrel runs along the hand, out past the
 			# knuckles, and the butt goes down into the closed fingers. It aims wherever
 			# the hand aims (the clip points the hand at the player).
@@ -703,11 +685,9 @@ func _held_pose() -> Transform3D:
 			var gb := Basis(gx, gy, gz)
 			gb = gb.rotated(gx, clampf(-v.y * 0.15 + v.z * 0.08, -0.2, 0.2))
 			return Transform3D(gb, tips + gy * CARD_SIZE.y * 0.38)
-		if not _heavy:
-			# its bottom edge in the pinch, the rest standing out of the hand
-			return Transform3D(b, _pinch(_held_side) + y * CARD_SIZE.y * 0.42 - to_cam * 0.006)
-		return Transform3D(b, _fist_center("hand." + _held_side) + y * CARD_SIZE.y * 0.55)
-	return Transform3D(b, hand + along * (0.035 + _grip_extra) + y * CARD_SIZE.y * 0.28 + to_cam * (0.01 + _grip_extra * 0.5))
+		# its bottom edge in the pinch, the rest standing out of the hand
+		return Transform3D(b, _pinch(_held_side) + y * CARD_SIZE.y * 0.42 - to_cam * 0.006)
+	return Transform3D(b, hand + along * 0.035 + y * CARD_SIZE.y * 0.28 + to_cam * 0.01)
 
 
 func _held_now() -> Transform3D:
@@ -938,13 +918,8 @@ func rival_play_card(card: Card) -> void:
 	# only now and then he shows you the card first
 	var r := _rng.randf()
 	var clip := "play_toss" if r < 0.45 else ("play_place" if r < 0.85 else "play")
-	if _heavy:
-		# he doesn't flick cards: he puts them down, hard (sometimes a heavy toss)
-		# from his own side: a slow, low toss most of the time; reaching over the
-		# pile with those arms would cover the whole table
-		clip = "play_toss" if r < 0.75 else "play_place"
 	_held_side = "R" if _mixamo else "L"
-	if _mixamo and not _heavy:
+	if _mixamo:
 		# sometimes the fan hand plays, sometimes the free hand plucks the card out
 		if rival_kind == "gila":
 			# (8/11) always the free hand: it plucks the card out of the fan and either
@@ -990,12 +965,6 @@ func rival_play_card(card: Card) -> void:
 			await _fly_to_pile(node, card, start, _hand_vel.limit_length(0.6) * 0.5, 0.26, 0.0)
 		_:
 			await _fly_to_pile(node, card, start, _hand_vel.limit_length(2.0) * 0.8 + Vector3(0, 0.2, 0), 0.38, _rng.randf_range(-0.6, 0.6))
-	if _heavy:
-		# the table takes the blow
-		shake(0.6)
-		_grin_to(1.5, 0.5)
-		_expression(0.5, 0.6)
-		_lamp_kick = maxf(_lamp_kick, 0.55)
 
 
 ## He draws `count` cards: his free hand takes them off the deck (a small stack when
@@ -1055,9 +1024,6 @@ func rival_hurt() -> void:
 
 
 func rival_shoot() -> void:
-	if _heavy:
-		await _rival_hurl()
-		return
 	_held_side = "L"   # the gun is in his left hand
 	_play("shoot")
 	await _at(_ev("shoot", "draw"))
@@ -1255,88 +1221,7 @@ func _shot_wisp() -> CPUParticles3D:
 
 ## What his attack is called on screen.
 func attack_caption(damage: int) -> String:
-	return ("Rival smashes a bottle on you! -%d HP" if _heavy else "Rival shoots! -%d HP") % damage
-
-
-func _bottle_prop() -> Node3D:
-	var b := Node3D.new()
-	for n: String in ["Prop_Bottle", "Prop_Label"]:
-		var src := _world.find_child(n, true, false) as MeshInstance3D
-		if src == null:
-			continue
-		var mi := MeshInstance3D.new()
-		mi.mesh = src.mesh
-		for k: int in range(src.mesh.get_surface_count()):
-			mi.set_surface_override_material(k, src.get_active_material(k))
-		b.add_child(mi)
-	_world.add_child(b)
-	return b
-
-
-## Reaches down beside his chair for a bottle, winds up over his head with the whole
-## body and throws it straight at the player; it bursts against the screen.
-func _rival_hurl() -> void:
-	_play("hurl")
-	_expression(0.35, 2.4)
-	_grin_to(1.45, 2.4)
-	await _at(_ev("hurl", "grab"))
-	var bottle := _bottle_prop()
-	var holding := true
-	var follow := func() -> void:
-		while holding and is_instance_valid(bottle):
-			var hb := _skeleton.find_bone("hand.L")
-			var xf := _skeleton.global_transform * _skeleton.get_bone_global_pose(hb)
-			# held by the neck, the body hanging out of the fist
-			var up := -xf.basis.y.normalized()
-			var side := up.cross(Vector3.FORWARD).normalized()
-			if side.length() < 0.1:
-				side = Vector3.RIGHT
-			var fwd := side.cross(up).normalized()
-			bottle.global_transform = Transform3D(Basis(side, up, fwd), _fist_center("hand.L") - up * 0.2)
-			await get_tree().process_frame
-	follow.call()
-	await _at(_ev("hurl", "release"))
-	holding = false
-	rival_event.emit("release")
-	# it flies end over end, straight into the camera
-	var start := bottle.global_transform
-	var to := camera.global_transform * Vector3(0.02, -0.02, -0.12)
-	var t := create_tween()
-	t.tween_method(func(u: float) -> void:
-		var p := start.origin.lerp(to, u * u * (3.0 - 2.0 * u) * 0.35 + u * 0.65) + Vector3.UP * sin(u * PI) * 0.12
-		bottle.global_transform = Transform3D(start.basis.rotated(camera.global_basis.x, -u * TAU * 1.3), p), 0.0, 1.0, 0.36)
-	await t.finished
-	bottle.queue_free()
-	_glass_burst(to)
-	_lamp_kick = 1.0
-	rival_event.emit("fire")
-
-
-## Glass and whisky spraying off the screen.
-func _glass_burst(at: Vector3) -> void:
-	for kind: int in [0, 1]:
-		var p := CPUParticles3D.new()
-		p.one_shot = true
-		p.amount = 26 if kind == 0 else 34
-		p.lifetime = 0.9
-		p.explosiveness = 1.0
-		p.direction = camera.global_basis.z * -1.0
-		p.spread = 75.0
-		p.initial_velocity_min = 0.4
-		p.initial_velocity_max = 1.3
-		p.gravity = Vector3(0, -2.6, 0)
-		var q := QuadMesh.new()
-		q.size = Vector2(0.012, 0.012) if kind == 0 else Vector2(0.008, 0.008)
-		var m := StandardMaterial3D.new()
-		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-		m.albedo_color = Color(0.82, 0.9, 0.85) if kind == 0 else Color(0.75, 0.42, 0.12)
-		q.material = m
-		p.mesh = q
-		_world.add_child(p)
-		p.global_position = at
-		p.emitting = true
-		get_tree().create_timer(1.2).timeout.connect(p.queue_free)
+	return "Rival shoots! -%d HP" % damage
 
 
 func _twirl_later() -> void:

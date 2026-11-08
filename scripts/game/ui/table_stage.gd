@@ -249,7 +249,6 @@ func new_encounter(encounter: RefCounted) -> void:
 	_release(1)
 	# each enemy has his own face: the Aggressor is the Gila (the lizard gunman),
 	# the Trickster the traveling dentist, the rest face the card sharp.
-	# (El Tuerto, the old Aggressor, is still there: set_rival("tuerto").)
 	var kinds := {"aggressor": "gila", "trickster": "matasanos"}
 	duel.set_rival(kinds.get(encounter.enemy_id, "tahur"))
 	duel.rival_reset()
