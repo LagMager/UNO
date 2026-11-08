@@ -2,16 +2,19 @@ class_name ShopView
 extends SubViewportContainer
 
 ## The shop: a trading post counter with a teller's cage. The player stands at the
-## counter; the merchant sits behind the bars in the half dark, smoking. The cards
-## for sale lie on a leather mat on the player's side, with a bottle of whisky and
-## the player's coins. A kerosene lantern lights the counter and moonlight from a
-## back window throws the shadow of the bars across it.
+## counter; behind the bars the shopkeeper (a hare in a waistcoat and apron, bunny.glb)
+## leans on his glass display case. The cards for sale lie on a leather mat on the
+## player's side, with a bottle of whisky and the player's coins. Coins are pushed under
+## the bars onto his glass; he picks them up, bites one and pockets them.
+## A kerosene lantern lights the counter and moonlight from a back window throws the
+## shadow of the bars across it. His ears, blinks and glances live in shopkeeper_face.gd.
 ## Same look as the duel (fat pixels, dithering, toon shading), different place.
 ## The player's arms are real 3D: a fist travels to an item, closes on it and the
 ## item moves with the fist from then on.
 
 const CardViewScript = preload("res://scripts/game/card_view.gd")
-const RIVAL_SCENE := preload("res://assets/models/rival.glb")
+const BUNNY_SCENE := preload("res://assets/models/bunny.glb")
+const ShopkeeperFace := preload("res://scripts/run/ui/shopkeeper_face.gd")
 const PROPS_SCENE := preload("res://assets/models/table_set.glb")
 const WALL_TEX := preload("res://assets/textures/saloon_wall.jpg")
 const WOOD_TEX := preload("res://assets/textures/wood_grain.png")
@@ -31,7 +34,17 @@ const PURSE := Vector3(-0.29, COUNTER_TOP, 0.36)
 const BOTTLE_AT := Vector3(0.34, COUNTER_TOP, 0.32)
 const SLOT := Vector3(0.0, COUNTER_TOP, 0.1)     # the gap under the bars
 const BARS_Z := 0.04
-const MERCHANT_AT := Vector3(0.0, 0.36, -1.0)   # the cashier sits up high, behind the cage
+const CANDLE_AT := Vector3(0.5, COUNTER_TOP, -0.3)
+const MERCHANT_AT := Vector3(0.0, 0.0, -0.62)   # the shopkeeper stands behind his display case
+const CASE_NEAR := -0.42                        # the case's edge on his side (its other edge is at the bars)
+const COIN_SPOT := Vector3(0.006, COUNTER_TOP, -0.174)   # where pushed coins stop on his glass (he picks them there)
+# between his thumb and index tips, in Godot's hand.R bone space. Measured IN GODOT (the glTF
+# import gives the bones other local axes than Blender's, so Blender's offset does not carry over)
+const PINCH := Vector3(0.0230, 0.1167, 0.0659)
+# when things happen in his clips (seconds, 30 fps)
+const TAKE_GRAB := 32.0 / 30.0
+const TAKE_POCKET := 123.0 / 30.0
+const FIDGETS := ["sniff", "scratch", "polish", "yawn", "drum", "listen", "ear_fix", "drum"]
 const INK := Color("#141010")
 const ARM := Color("#2a2422")
 const UPPER_LEN := 0.4
@@ -62,6 +75,12 @@ var _purse: Array[Node3D] = []
 var _anim: AnimationPlayer
 var _merchant_clip := "idle"
 var _fidget_wait := 6.0
+var _face: Node            # shopkeeper_face.gd (ears, blinks, glances)
+var _skeleton: Skeleton3D
+var _hand_r: BoneAttachment3D
+var _offer_cool := 0.0
+var _last_hover := -1
+var _mood_stamp := 0
 var _lantern: OmniLight3D
 var _flame: StandardMaterial3D
 var _flicker := 0.0
@@ -213,20 +232,30 @@ func _build_environment() -> void:
 	moon.light_volumetric_fog_energy = 3.0
 	_world.add_child(moon)
 	moon.look_at_from_position(Vector3(-1.05, 2.45, -1.62), Vector3(0.05, COUNTER_TOP, 0.32))
-	# the merchant's own candle: he is lit from below, barely
+	# the shopkeeper's own candle, on the corner of his case: warm light on his face from below
 	var candle := OmniLight3D.new()
 	candle.light_color = Color("#ff9a48")
-	candle.light_energy = 1.0
-	candle.omni_range = 1.1
-	candle.position = MERCHANT_AT + Vector3(0.24, 0.86, 0.22)
+	candle.light_energy = 1.1
+	candle.omni_range = 1.2
+	candle.position = CANDLE_AT + Vector3(0, 0.12, 0)
 	_world.add_child(candle)
+	# cold rim from the back window: the ears read against the dark wall
 	var rim := SpotLight3D.new()
 	rim.light_color = Color("#9fb2c8")
-	rim.light_energy = 1.6
-	rim.spot_range = 2.4
-	rim.spot_angle = 26.0
+	rim.light_energy = 2.0
+	rim.spot_range = 2.6
+	rim.spot_angle = 28.0
 	_world.add_child(rim)
-	rim.look_at_from_position(MERCHANT_AT + Vector3(0.5, 1.8, -0.7), MERCHANT_AT + Vector3(0.0, 1.0, 0.1))
+	rim.look_at_from_position(MERCHANT_AT + Vector3(-0.5, 2.1, -0.7), MERCHANT_AT + Vector3(0.0, 1.45, 0.0))
+	# a soft warm fill on his face (from the lantern's side), so the eyes and ears read
+	var fill := SpotLight3D.new()
+	fill.light_color = Color("#ffcf9a")
+	fill.light_energy = 0.9
+	fill.spot_range = 2.6
+	fill.spot_angle = 18.0
+	fill.spot_angle_attenuation = 1.4
+	_world.add_child(fill)
+	fill.look_at_from_position(Vector3(-0.45, 1.75, 0.6), MERCHANT_AT + Vector3(0.0, 1.35, 0.12))
 
 
 func _build_room() -> void:
@@ -276,15 +305,15 @@ func _build_counter() -> void:
 	var wood := _mat(Color("#7a4a2a"), WOOD_TEX, 0.004)
 	var dark := _mat(Color("#3a2416"), WOOD_TEX, 0.004)
 	# top slab and front panel (the player's side)
-	_box(Vector3(2.6, 0.06, 0.66), Vector3(0.0, COUNTER_TOP - 0.03, 0.24), wood)
+	_box(Vector3(2.6, 0.06, 0.57), Vector3(0.0, COUNTER_TOP - 0.03, 0.285), wood)
 	_box(Vector3(2.6, COUNTER_TOP - 0.06, 0.04), Vector3(0.0, (COUNTER_TOP - 0.06) * 0.5, 0.55), dark)
 	# leather mat where the stock is laid out
 	_box(Vector3(0.52, 0.004, 0.22), Vector3(0.0, COUNTER_TOP + 0.002, ITEM_Z), _mat(Color("#3a2a20"), FABRIC_TEX, 0.0, 6.0))
-	# the cage: a low board with a slot in the middle, rails, bars
+	# the cage: rails and bars; the gap under the bottom rail is where money and goods pass
 	var brass := _mat(Color("#8a6a34"), GRIME_TEX, 0.003)
 	var iron := _mat(Color("#2b2a2a"), GRIME_TEX, 0.003)
 	for side: float in [-1.0, 1.0]:
-		_box(Vector3(1.08, 0.14, 0.04), Vector3(side * 0.76, COUNTER_TOP + 0.07, BARS_Z), dark)
+		_box(Vector3(0.04, 0.155, 0.04), Vector3(side * 0.62, COUNTER_TOP + 0.078, BARS_Z), brass)
 	_box(Vector3(2.6, 0.03, 0.05), Vector3(0.0, COUNTER_TOP + 0.155, BARS_Z), brass)
 	_box(Vector3(2.6, 0.03, 0.05), Vector3(0.0, 2.05, BARS_Z), brass)
 	var x := -1.28
@@ -357,25 +386,134 @@ func _build_props() -> void:
 
 
 func _build_merchant() -> void:
-	var m := RIVAL_SCENE.instantiate() as Node3D
+	_build_case()
+	var m := BUNNY_SCENE.instantiate() as Node3D
 	m.position = MERCHANT_AT
 	_world.add_child(m)
-	_stylize(m, 0.006, {"lp_bandana": Color("#46563a"), "lp_hatband": Color("#5e4c34")})
+	_stylize_bunny(m)
 	_anim = m.find_children("*", "AnimationPlayer", true, false)[0]
 	for n: String in _anim.get_animation_list():
 		if n.ends_with("idle"):
 			_anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR
-	_anim.animation_finished.connect(func(_n: StringName) -> void: _merchant_play("idle", 0.5))
+	_anim.animation_finished.connect(func(_n: StringName) -> void: _merchant_play("idle", 0.45))
+	_skeleton = m.find_children("*", "Skeleton3D", true, false)[0]
+	_face = ShopkeeperFace.new()
+	_skeleton.add_child(_face)
+	_hand_r = BoneAttachment3D.new()
+	_hand_r.bone_name = "hand.R"
+	_skeleton.add_child(_hand_r)
 	_merchant_play("idle", 0.0)
-	# his desk, where his hands rest
-	var desk := _mat(Color("#4a2e1c"), WOOD_TEX, 0.004)
-	_box(Vector3(0.9, 0.05, 0.42), MERCHANT_AT + Vector3(0.0, 0.757, 0.16), desk)
-	var base_h := 0.73 + MERCHANT_AT.y
-	_box(Vector3(0.86, base_h, 0.38), Vector3(MERCHANT_AT.x, base_h * 0.5, MERCHANT_AT.z + 0.16), _mat(Color("#2a1a10"), WOOD_TEX))
-	# the raised floor he sits on
-	_box(Vector3(1.6, MERCHANT_AT.y, 1.2), Vector3(MERCHANT_AT.x, MERCHANT_AT.y * 0.5, MERCHANT_AT.z - 0.1), _mat(Color("#24170e"), WOOD_TEX))
+
+
+## His display case: a wooden base and a glass box, its glass top flush with the counter
+## (the money slides under the bars straight onto it). A few wares inside.
+func _build_case() -> void:
+	var wood := _mat(Color("#5a3820"), WOOD_TEX, 0.004)
+	var dark := _mat(Color("#2a1a10"), WOOD_TEX)
+	var depth := -CASE_NEAR
+	var cz := CASE_NEAR * 0.5
+	var glass_h := 0.2
+	var base_h := COUNTER_TOP - glass_h - 0.02
+	_box(Vector3(1.5, base_h, depth), Vector3(0.0, base_h * 0.5, cz), dark)
+	# the floor of the glass box (the wares lie on it) and the wooden frame
+	_box(Vector3(1.46, 0.02, depth - 0.02), Vector3(0.0, base_h + 0.01, cz), _mat(Color("#4a2a1c"), FABRIC_TEX, 0.0, 5.0))
+	for x: float in [-0.74, 0.0, 0.74]:
+		for z: float in [CASE_NEAR + 0.015, -0.015]:
+			_box(Vector3(0.025, glass_h, 0.025), Vector3(x, base_h + glass_h * 0.5, z), wood)
+	_box(Vector3(1.5, 0.02, 0.025), Vector3(0.0, COUNTER_TOP - 0.01, CASE_NEAR + 0.0125), wood)
+	# the glass must READ as a surface (his paws rest on it): a tinted pane, a wooden rim all
+	# round and a couple of pale streaks of the lantern's reflection
+	var glass := StandardMaterial3D.new()
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.albedo_color = Color(0.55, 0.7, 0.74, 0.32)
+	glass.metallic_specular = 1.0
+	glass.roughness = 0.15
+	glass.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var top := _box(Vector3(1.48, 0.006, depth), Vector3(0.0, COUNTER_TOP - 0.003, cz), glass)
+	top.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for x: float in [-0.75, 0.75]:
+		_box(Vector3(0.03, 0.02, depth), Vector3(x, COUNTER_TOP - 0.008, cz), wood)
+	_box(Vector3(1.53, 0.02, 0.03), Vector3(0.0, COUNTER_TOP - 0.008, -0.012), wood)
+	var streak := StandardMaterial3D.new()
+	streak.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	streak.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	streak.albedo_color = Color(0.95, 0.92, 0.85, 0.22)
+	for k: int in range(2):
+		var st := _box(Vector3(0.5 - k * 0.22, 0.001, 0.018 + k * 0.01), Vector3(-0.3 + k * 0.62, COUNTER_TOP + 0.0005, cz + 0.06 - k * 0.12), streak)
+		st.rotation.y = 0.55
+		st.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# wares: cartridge boxes, a pocket watch, a knife, small bottles of tonic
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1879
+	var floor_y := base_h + 0.02
+	var boxes := [Color("#7a2a1e"), Color("#3e4a2c"), Color("#8a6a34")]
+	for k: int in range(5):
+		var x := -0.62 + k * 0.29 + rng.randf_range(-0.03, 0.03)
+		var z := cz + rng.randf_range(-0.08, 0.08)
+		match k % 3:
+			0:
+				var b := _box(Vector3(0.09, 0.045, 0.06), Vector3(x, floor_y + 0.0225, z), _mat(boxes[k % boxes.size()], GRIME_TEX, 0.003))
+				b.rotation.y = rng.randf_range(-0.4, 0.4)
+			1:
+				var bottle := _mat(Color("#2f4a2a"), GRIME_TEX, 0.003)
+				for j: int in range(2):
+					var h := rng.randf_range(0.1, 0.13)
+					var bx := x + j * 0.06
+					_cyl(0.022, h, Vector3(bx, floor_y + h * 0.5, z), bottle)
+					_cyl(0.009, 0.03, Vector3(bx, floor_y + h + 0.015, z), bottle)
+			2:
+				var watch := _cyl(0.026, 0.01, Vector3(x, floor_y + 0.005, z), _mat(Color("#c9954f"), GRIME_TEX, 0.002))
+				watch.rotation.x = 0.1
+				var blade := _box(Vector3(0.16, 0.006, 0.022), Vector3(x + 0.1, floor_y + 0.003, z + 0.05), _mat(Color("#8a8f94"), GRIME_TEX, 0.002))
+				blade.rotation.y = 0.5
+	# his candle on the corner of the case
 	var wax := _mat(Color("#d8c8a0"))
-	_cyl(0.015, 0.07, MERCHANT_AT + Vector3(0.24, 0.817, 0.22), wax)
+	_cyl(0.03, 0.012, CANDLE_AT + Vector3(0, 0.006, 0), _mat(Color("#8a6a34"), GRIME_TEX, 0.002))
+	_cyl(0.014, 0.08, CANDLE_AT + Vector3(0, 0.052, 0), wax)
+	var flame := StandardMaterial3D.new()
+	flame.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flame.albedo_color = Color("#ffd27a")
+	var f := _cyl(0.005, 0.02, CANDLE_AT + Vector3(0, 0.102, 0), flame, null, 0.001)
+	f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+## His materials: the painted texture with hard pixels, glossy dark eyes with a glint
+## that never shades, a dark mouth and ivory teeth.
+func _stylize_bunny(root: Node) -> void:
+	for node in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := node as MeshInstance3D
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		for s: int in range(mi.mesh.get_surface_count()):
+			var src := mi.get_active_material(s) as BaseMaterial3D
+			if src == null:
+				continue
+			var n := src.resource_name
+			var m := StandardMaterial3D.new()
+			m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON
+			m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+			m.roughness = 1.0
+			if n.begins_with("tx_"):
+				m.albedo_texture = src.albedo_texture
+				m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
+				m.albedo_color = Color(0.9, 0.86, 0.84)
+				var o := ShaderMaterial.new()
+				o.shader = OUTLINE
+				o.set_shader_parameter("grow", 0.004)
+				m.next_pass = o
+			elif n.contains("glint"):
+				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				m.albedo_color = Color(1, 0.97, 0.9)
+			elif n.contains("eye"):
+				m.albedo_color = Color("#120a07")
+				m.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+				m.roughness = 0.25
+			elif n.contains("mouth"):
+				m.albedo_color = Color("#2a0e0c")
+			elif n.contains("teeth"):
+				m.albedo_color = Color("#cfc4a4")
+			else:
+				m.albedo_color = src.albedo_color
+			mi.set_surface_override_material(s, m)
 
 
 func _merchant_play(clip: String, blend := 0.35) -> void:
@@ -650,21 +788,67 @@ func pay(price: int) -> void:
 		var t := create_tween()
 		t.tween_property(c, "global_position", land, 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await get_tree().create_timer(0.12).timeout
-	# a push with the fingertips through the slot
+	# a push with the fingertips under the bars: they slide onto his glass and stop in a heap
 	await _move("L", at_slot.translated(Vector3(0, -0.012, -0.08)), 0.22, 0.0)
-	for c in coins:
+	for k: int in range(coins.size()):
+		var c := coins[k]
+		var a := k * 2.4
+		var to := COIN_SPOT + Vector3(cos(a) * 0.012 * minf(k, 1.0), _coin_h * (0.5 + (k % 4)), sin(a) * 0.01 * minf(k, 1.0))
 		var t := create_tween()
-		t.tween_property(c, "global_position:z", c.global_position.z - 0.45, 0.6).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		t.tween_callback(c.queue_free)
-	_merchant_play("draw")
-	await _home("L", 0.45)
+		t.tween_property(c, "global_position", to, 0.5 + k * 0.03).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_home("L", 0.45)
+	await get_tree().create_timer(0.35).timeout
+	_shopkeeper_takes(coins)
+
+
+## The clink on the glass: he picks the coins up between thumb and fingers, bites one and
+## pockets them. They are in his hand from the grab until the pocket (never flying).
+func _shopkeeper_takes(coins: Array[Node3D]) -> void:
+	_merchant_play("take_coins", 0.25)
+	_ear_mood(-14.0, -6.0, 1.2)
+	await _at_clip("take_coins", TAKE_GRAB - 0.05)
+	for k: int in range(coins.size()):
+		var c := coins[k]
+		if not is_instance_valid(c):
+			continue
+		c.reparent(_hand_r, true)
+		# into the pinch, stacked edge-on between thumb and fingers
+		var t := create_tween()
+		t.tween_property(c, "position", PINCH + Vector3(0, k * _coin_h * 1.05, 0), 0.07)
+		t.parallel().tween_property(c, "quaternion", Quaternion(Vector3.RIGHT, PI * 0.5), 0.07)
+	await _at_clip("take_coins", TAKE_POCKET)
+	for c in coins:
+		if is_instance_valid(c):
+			c.queue_free()
+
+
+## Waits until his current clip reaches `t` seconds (or he is doing something else).
+func _at_clip(clip: String, t: float) -> void:
+	while is_inside_tree() and _merchant_clip == clip and _anim.current_animation_position < t:
+		await get_tree().process_frame
+
+
+## The ears' mood for a while (degrees: + back = pinned, - = pricked; + out = splayed).
+func _ear_mood(back: float, out: float, hold: float) -> void:
+	if _face == null:
+		return
+	_face.ear_back = back
+	_face.ear_out = out
+	var stamp := Time.get_ticks_msec()
+	_mood_stamp = stamp
+	await get_tree().create_timer(hold).timeout
+	if _mood_stamp == stamp and _face != null:
+		_face.ear_back = 0.0
+		_face.ear_out = 0.0
 
 
 ## Not enough coins: the hand goes to the purse, finds it short, and he just stares.
 func refuse() -> void:
 	if _hand_busy["L"]:
 		return
-	_merchant_play("stare")
+	# two ways to say no: the head shake with a wag, or arms crossed in an X, eyes shut
+	_merchant_play("refuse_cross" if _rng.randf() < 0.5 else "refuse", 0.25)
+	_ear_mood(26.0, 10.0, 3.0)
 	var over := Transform3D(Basis(Vector3.RIGHT, -0.5), PURSE + Vector3(0, 0.05, 0.02))
 	await _move("L", over, 0.3, 0.04)
 	for c in _purse:
@@ -699,6 +883,7 @@ func buy_card(i: int) -> void:
 	await _move("R", _fist_for(card, Transform3D(cb.rotated(cb.x, -1.0), camera.global_transform * Vector3(0.24, -0.5, -0.25))), 0.34, 0.0)
 	card.queue_free()
 	_items.erase(i)
+	_nod_later()
 	await _home("R", 0.45)
 
 
@@ -731,12 +916,22 @@ func buy_drink() -> void:
 	_bottle.reparent(_world, true)
 	_bottle.global_transform = _bottle_rest
 	_shake = 0.2
+	_nod_later()
 	await _home("R", 0.4)
 
 
 func merchant_glance() -> void:
 	if _merchant_clip == "idle":
-		_merchant_play("stare")
+		_merchant_play("sniff")
+
+
+## After the sale he is pleased: as soon as he has pocketed the money, a little nod.
+func _nod_later() -> void:
+	while is_inside_tree() and _merchant_clip == "take_coins":
+		await get_tree().process_frame
+	if _merchant_clip == "idle":
+		_merchant_play("nod", 0.3)
+		_ear_mood(-8.0, 4.0, 1.0)
 
 
 # ------------------------------------------------------------------ fx
@@ -777,12 +972,33 @@ func _process(delta: float) -> void:
 		var fist := _fist[side] as Node3D
 		fist.global_transform = fist.global_transform.interpolate_with(want, 1.0 - exp(-delta * 5.0))
 	_update_arms()
-	# merchant: still, with a gesture now and then
+	# shopkeeper: leaning on his case, a habit now and then; he watches what you look at
 	_fidget_wait -= delta
+	_offer_cool -= delta
 	if _fidget_wait <= 0.0:
-		_fidget_wait = _rng.randf_range(6.0, 12.0)
-		if _merchant_clip == "idle":
-			_merchant_play(["smoke", "stare", "impatient", "smoke"][_rng.randi() % 4])
+		_fidget_wait = _rng.randf_range(7.0, 13.0)
+		if _merchant_clip == "idle" and hover < 0:
+			_merchant_play(FIDGETS[_rng.randi() % FIDGETS.size()])
+	if _face != null:
+		if hover >= 0:
+			var hp := _bottle_rest.origin if hover == bottle_index else ((_item_rest.get(hover, Transform3D()) as Transform3D).origin)
+			# while he offers the goods he looks at YOU (not at the goods or his own paw)
+			_face.look_target = camera.global_position if _merchant_clip == "offer" else hp
+			_face.look_weight = 0.7 if _merchant_clip == "offer" else 1.0
+			if hover != _last_hover:
+				# the ears prick toward the goods, and the first look gets his pitch
+				_face.ear_back = -12.0
+				_face.ear_out = 5.0
+				if _offer_cool <= 0.0 and _merchant_clip == "idle":
+					_offer_cool = 9.0
+					_merchant_play("offer", 0.3)
+		else:
+			_face.look_target = camera.global_position
+			_face.look_weight = 0.6
+			if _last_hover >= 0:
+				_face.ear_back = 0.0
+				_face.ear_out = 0.0
+	_last_hover = hover
 	# the lantern breathes and gutters
 	_flicker -= delta
 	var level := 1.0 - 0.06 * sin(_time * 23.0) * sin(_time * 2.7)
@@ -812,7 +1028,9 @@ var _look := LOOK_AT
 
 ## Kept for the menu/map screens that reset the scene.
 func rival_reset() -> void:
-	_merchant_play("idle", 0.0)
+	# either he greets you, or you catch him dozing on the glass and he jumps
+	_merchant_play("greet_startle" if _rng.randf() < 0.5 else "greet", 0.0)
+	_fidget_wait = _rng.randf_range(8.0, 12.0)
 	_hand_busy = {"L": false, "R": false}
 	if _bottle.get_parent() != _world:
 		_bottle.reparent(_world, true)
