@@ -46,7 +46,29 @@ func _ready() -> void:
 	_leave.custom_minimum_size = Vector2(120, 42)
 	_leave.pressed.connect(leave)
 	add_child(_leave)
+	_build_clip_buttons()
 	visibility_changed.connect(_on_visibility)
+
+
+## Test buttons: one per shopkeeper animation, top left (to review them one by one).
+func _build_clip_buttons() -> void:
+	var box := VBoxContainer.new()
+	box.position = Vector2(12, 12)
+	box.add_theme_constant_override("separation", 2)
+	add_child(box)
+	var title := Label.new()
+	title.text = "Animaciones"
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", CREAM)
+	box.add_child(title)
+	for clip: String in view.clip_names():
+		var b := Button.new()
+		b.text = clip
+		b.custom_minimum_size = Vector2(110, 24)
+		b.add_theme_font_size_override("font_size", 13)
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(func() -> void: view.debug_play(clip))
+		box.add_child(b)
 
 
 func _label(font_size: int) -> Label:

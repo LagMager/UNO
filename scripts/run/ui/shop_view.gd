@@ -920,6 +920,33 @@ func buy_drink() -> void:
 	await _home("R", 0.4)
 
 
+## For the test buttons: every clip he has, and playing one by name (take_coins puts a few
+## coins on his glass first so the whole pick-up, bite and pocket can be seen).
+func clip_names() -> PackedStringArray:
+	var out := PackedStringArray()
+	for n: String in _anim.get_animation_list():
+		out.append(n.get_slice("/", n.get_slice_count("/") - 1))
+	return out
+
+
+func debug_play(clip: String) -> void:
+	if clip == "take_coins":
+		var coins: Array[Node3D] = []
+		for k: int in range(3):
+			var c := MeshInstance3D.new()
+			c.mesh = _coin_mesh
+			c.material_override = _coin_mat
+			_world.add_child(c)
+			c.global_position = COIN_SPOT + Vector3(k * 0.006, _coin_h * (0.5 + k), k * 0.004)
+			coins.append(c)
+		_shopkeeper_takes(coins)
+	elif clip == "refuse" or clip == "refuse_cross":
+		_merchant_play(clip, 0.25)
+		_ear_mood(26.0, 10.0, 3.0)
+	else:
+		_merchant_play(clip, 0.25)
+
+
 func merchant_glance() -> void:
 	if _merchant_clip == "idle":
 		_merchant_play("sniff")
