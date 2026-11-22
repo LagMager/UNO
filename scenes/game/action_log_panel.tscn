@@ -1,0 +1,47 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/ui/action_log_panel.gd" id="1_action_log_panel"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_log_panel"]
+bg_color = Color(0.254902, 0.254902, 0.254902, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.384314, 0.384314, 0.384314, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[node name="ActionLog" type="PanelContainer"]
+custom_minimum_size = Vector2(270, 130)
+script = ExtResource("1_action_log_panel")
+
+[node name="LogMargin" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="LogColumn" type="VBoxContainer" parent="LogMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HistoryTitle" type="Label" parent="LogMargin/LogColumn"]
+theme_type_variation = &"HeaderLabel"
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Recent actions"
+
+[node name="EnemyLabel" type="Label" parent="LogMargin/LogColumn"]
+layout_mode = 2
+
+[node name="EnemyBehaviorLabel" type="Label" parent="LogMargin/LogColumn"]
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="Entries" type="RichTextLabel" parent="LogMargin/LogColumn"]
+layout_mode = 2
+size_flags_vertical = 3

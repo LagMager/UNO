@@ -1,0 +1,97 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/map/ui/map_view.gd" id="1_map_view"]
+[ext_resource type="Script" path="res://scripts/map/ui/map_graph_canvas.gd" id="2_graph_canvas"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_map_panel"]
+bg_color = Color(0.14, 0.14, 0.16, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.35, 0.4, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="MapView" type="MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 18
+script = ExtResource("1_map_view")
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Header" type="HBoxContainer" parent="Column"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="TitleLabel" type="Label" parent="Column/Header"]
+theme_type_variation = &"HeaderLabel"
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Expedition Map"
+
+[node name="StatsLabel" type="Label" parent="Column/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 16
+text = "HP: 8 / 8  |  Gold: 30"
+
+[node name="SeedLabel" type="Label" parent="Column/Header"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.75, 1)
+text = "Seed: 1337"
+
+[node name="StatusBanner" type="Label" parent="Column"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Select a highlighted node to advance"
+
+[node name="MapPanel" type="PanelContainer" parent="Column"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ScrollContainer" type="ScrollContainer" parent="Column/MapPanel"]
+layout_mode = 2
+horizontal_scroll_mode = 2
+vertical_scroll_mode = 2
+
+[node name="GraphCanvas" type="Control" parent="Column/MapPanel/ScrollContainer"]
+layout_mode = 2
+script = ExtResource("2_graph_canvas")
+
+[node name="Footer" type="HBoxContainer" parent="Column"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="RestartRunButton" type="Button" parent="Column/Footer"]
+layout_mode = 2
+text = "New Map Run"
+
+[node name="DeckButton" type="Button" parent="Column/Footer"]
+layout_mode = 2
+text = "Deck (60)"
+
+[node name="ChooseModeButton" type="Button" parent="Column/Footer"]
+layout_mode = 2
+text = "Choose mode"
+
+[node name="Spacer" type="Control" parent="Column/Footer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HintLabel" type="Label" parent="Column/Footer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.75, 0.78, 1)
+theme_override_font_sizes/font_size = 12
+text = "[⚔] Encounter   [?] Decision   [$] Shop   [+] Safe Room   [!] Elite   [★] Boss"
