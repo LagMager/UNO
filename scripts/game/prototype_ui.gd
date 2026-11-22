@@ -26,6 +26,11 @@ const WildPickerScript = preload("res://scripts/game/ui/wild_picker.gd")
 const ShopScreenScript = preload("res://scripts/run/ui/shop_screen.gd")
 const ZoneScreenScript = preload("res://scripts/zones/zone_screen.gd")
 const RestScreenScript = preload("res://scripts/zones/rest_screen.gd")
+const MainMenuScript = preload("res://scripts/menu/main_menu.gd")
+const SettingsPanelScript = preload("res://scripts/menu/settings_panel.gd")
+const UIGrimeScript = preload("res://scripts/ui/grime.gd")
+const ScreenBurnScript = preload("res://scripts/ui/screen_burn.gd")
+const PausePanelScript = preload("res://scripts/menu/pause_panel.gd")
 ## Gold and health for a shop opened from the menu (just to look around).
 const PREVIEW_GOLD := 100
 const PREVIEW_WOUNDS := 6
@@ -37,6 +42,13 @@ var shop_screen: ShopScreenScript
 var _shop_preview := false
 var _rest_preview := false
 var zone_screen: ZoneScreenScript
+## The first screen: La Cantina with Play / Settings / Quit (tests live behind Debug).
+var main_menu: MainMenuScript
+## Burns the old screen away whenever the scenery changes.
+var screen_burn: ScreenBurnScript
+var _scenery := ""
+## Esc during a run (shows the seed, with a button to copy it).
+var pause_panel: PausePanelScript
 ## The map's Safe Room, shown as the 3D Rest Point (built when first needed).
 var rest_screen: RestScreenScript
 var encounter: RefCounted:
@@ -66,7 +78,28 @@ func _ready() -> void:
 	run_controller = RunControllerScript.new()
 	_connect_signals()
 	render()
-	show_selection()
+	SettingsPanelScript.apply_saved()
+	# behind every screen: near black, never the engine's grey
+	RenderingServer.set_default_clear_color(Color(0.02, 0.016, 0.015))
+	screen_burn = ScreenBurnScript.new()
+	add_child(screen_burn)
+	main_menu = MainMenuScript.new()
+	main_menu.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(main_menu)
+	move_child(main_menu, deck_dialog.get_index())
+	main_menu.play_requested.connect(func() -> void:
+		map_view.debug_tools = false
+		start_map_run())
+	main_menu.debug_requested.connect(show_selection)
+	selection_view.back_requested.connect(show_main_menu)
+	pause_panel = PausePanelScript.new()
+	add_child(pause_panel)
+	move_child(pause_panel, deck_dialog.get_index())
+	pause_panel.resume_requested.connect(func() -> void: pause_panel.visible = false)
+	pause_panel.main_menu_requested.connect(func() -> void:
+		pause_panel.visible = false
+		show_main_menu())
+	show_main_menu()
 	get_viewport().size_changed.connect(update_layout)
 	# The old gray enemy box stays for layout and tests; the rival is now drawn at the table.
 	enemy_stage.modulate.a = 0.0
@@ -88,7 +121,39 @@ func _ready() -> void:
 	selection_view.shop_requested.connect(open_shop_preview)
 	selection_view.zone_requested.connect(open_zone_preview)
 	selection_view.rest_requested.connect(open_rest_preview)
+	# the whole interface gets the dirty, dithered finish of the 3D
+	UIGrimeScript.apply(self)
 	update_layout()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE):
+		return
+	if pause_panel == null or _scenery in ["main_menu", "menu", ""]:
+		return
+	if pause_panel.visible:
+		pause_panel.visible = false
+	else:
+		pause_panel.open(map_view.get_seed())
+	get_viewport().set_input_as_handled()
+
+
+func show_main_menu() -> void:
+	_set_scenery("main_menu")
+	enemy_stage.clear_hit_effects()
+	combat_view.visible = false
+	map_view.visible = false
+	interaction_view.visible = false
+	selection_view.visible = false
+	main_menu.open()
+
+
+## Leaving a fight or the map: a real run goes back to the main menu, a test to Debug.
+func _leave_play() -> void:
+	if run_session.mode == RunSessionScript.MODE_MAP:
+		show_main_menu()
+	else:
+		show_selection()
 
 
 func show_selection() -> void:
@@ -340,19 +405,21 @@ func _sync_map_defeat_if_needed() -> void:
 func _connect_signals() -> void:
 	selection_view.single_encounter_requested.connect(start_single)
 	selection_view.run_requested.connect(start_run)
-	selection_view.map_run_requested.connect(func() -> void: start_map_run())
+	selection_view.map_run_requested.connect(func() -> void:
+		map_view.debug_tools = true     # from Debug: the circles can be walked freely
+		start_map_run())
 	reward_panel.reward_selected.connect(select_reward)
 	reward_panel.reward_skipped.connect(skip_reward)
 	hand_dock.card_play_requested.connect(play_card)
 	hand_dock.draw_requested.connect(draw_card)
 	hand_dock.restart_requested.connect(restart_encounter)
 	hand_dock.deck_requested.connect(open_deck_dialog)
-	hand_dock.mode_select_requested.connect(show_selection)
+	hand_dock.mode_select_requested.connect(_leave_play)
 	hand_dock.next_encounter_requested.connect(advance_run)
 
 	map_view.node_selected.connect(func(node_id: String) -> void: run_controller.select_map_node(node_id))
 	map_view.deck_requested.connect(open_deck_dialog)
-	map_view.mode_select_requested.connect(show_selection)
+	map_view.mode_select_requested.connect(show_main_menu)
 	map_view.restart_run_requested.connect(func() -> void: start_map_run())
 
 	run_controller.map_shown.connect(_show_map)
@@ -364,9 +431,14 @@ func _connect_signals() -> void:
 
 
 func _set_scenery(kind: String) -> void:
+	if kind != _scenery and _scenery != "" and screen_burn != null:
+		screen_burn.burn()
+	_scenery = kind
+	if main_menu != null:
+		main_menu.visible = kind == "main_menu"
 	backdrop.visible = kind == "saloon"
 	table_stage.visible = kind == "table"
-	menu_backdrop.visible = kind in ["menu", "map"]
+	menu_backdrop.visible = kind == "menu"
 	# the shop is its own 3D room; the gray panel only keeps the shop's rules
 	interaction_view.get_node("Panel").visible = kind not in ["shop", "rest"]
 	if shop_screen != null:

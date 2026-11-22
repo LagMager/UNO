@@ -22,7 +22,9 @@ func _run() -> void:
 	root.add_child(ui)
 	await process_frame
 	await process_frame
-	_check(ui.selection_view.visible and not ui.combat_view.visible, "Selection should open before combat.")
+	_check(ui.main_menu.visible and not ui.selection_view.visible, "The main menu should open first.")
+	ui.show_selection()
+	_check(ui.selection_view.visible and not ui.combat_view.visible, "Debug should open the selection before combat.")
 	ui.selection_view.toggle_enemy_choices()
 	ui.start_single("standard")
 	await process_frame

@@ -10,6 +10,8 @@ signal shop_requested
 signal zone_requested(zone_id: String)
 ## The map's rest stop on its own: walk in, sit, choose (to try it without playing).
 signal rest_requested
+## Back to the main menu.
+signal back_requested
 
 const EnemyProfiles = preload("res://scripts/game/enemy_profiles.gd")
 
@@ -20,6 +22,7 @@ const EnemyProfiles = preload("res://scripts/game/enemy_profiles.gd")
 @onready var shop_button: Button = get_node_or_null("Panel/Padding/Choices/VisitShop")
 @onready var rest_point_button: Button = get_node_or_null("Panel/Padding/Choices/ViewRestPoint")
 @onready var rest_button: Button = get_node_or_null("Panel/Padding/Choices/RestAtFire")
+@onready var back_button: Button = get_node_or_null("Panel/Padding/Choices/BackToMenu")
 
 
 func _ready() -> void:
@@ -33,6 +36,8 @@ func _ready() -> void:
 		rest_point_button.pressed.connect(func() -> void: zone_requested.emit("rest_point"))
 	if rest_button != null:
 		rest_button.pressed.connect(func() -> void: rest_requested.emit())
+	if back_button != null:
+		back_button.pressed.connect(func() -> void: back_requested.emit())
 	_populate_enemy_choices()
 
 
