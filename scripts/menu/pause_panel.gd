@@ -6,6 +6,8 @@ extends Control
 
 signal resume_requested
 signal main_menu_requested
+## Save the run now (only offered on the map: see set_can_save).
+signal save_requested
 
 var _seed_label: Label
 var _copied: Label
@@ -58,7 +60,7 @@ func _ready() -> void:
 	_copied.add_theme_color_override("font_color", Color(0.55, 0.5, 0.43, 1))
 	_copied.modulate.a = 0.0
 	col.add_child(_copied)
-	for entry: Array in [["Resume", resume_requested], ["Main menu", main_menu_requested]]:
+	for entry: Array in [["Resume", resume_requested], ["Save", save_requested], ["Main menu", main_menu_requested]]:
 		var b := Button.new()
 		b.text = entry[0]
 		b.custom_minimum_size = Vector2(0, 44)
@@ -66,6 +68,19 @@ func _ready() -> void:
 		var sig: Signal = entry[1]
 		b.pressed.connect(func() -> void: sig.emit())
 		col.add_child(b)
+		if entry[0] == "Save":
+			_save_button = b
+
+
+var _save_button: Button
+
+
+## Saving is for the map: in a fight, a shop or a rest it says where it can be done.
+func set_can_save(on: bool, why := "") -> void:
+	if _save_button == null:
+		return
+	_save_button.disabled = not on
+	_save_button.text = "Save" if on else "Save  (%s)" % why
 
 
 func open(seed_value: int) -> void:

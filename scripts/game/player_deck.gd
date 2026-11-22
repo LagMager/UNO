@@ -14,6 +14,14 @@ func reset_to_starter() -> void:
 	_cards = CardSystem.make_starting_deck()
 
 
+## A saved deck coming back (see SaveGame).
+func load_cards(saved: Array[Card]) -> void:
+	_cards.clear()
+	for card: Card in saved:
+		if CardSystem.is_valid_card(card):
+			_cards.append(card)
+
+
 func size() -> int:
 	return _cards.size()
 
