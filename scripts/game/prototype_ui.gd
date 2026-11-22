@@ -25,6 +25,7 @@ const TableStageScript = preload("res://scripts/game/ui/table_stage.gd")
 const WildPickerScript = preload("res://scripts/game/ui/wild_picker.gd")
 const ShopScreenScript = preload("res://scripts/run/ui/shop_screen.gd")
 const ZoneScreenScript = preload("res://scripts/zones/zone_screen.gd")
+const RestScreenScript = preload("res://scripts/zones/rest_screen.gd")
 ## Gold and health for a shop opened from the menu (just to look around).
 const PREVIEW_GOLD := 100
 const PREVIEW_WOUNDS := 6
@@ -35,6 +36,8 @@ var decision_runner_factory: Callable = Callable()
 var shop_screen: ShopScreenScript
 var _shop_preview := false
 var zone_screen: ZoneScreenScript
+## The map's Safe Room, shown as the 3D Rest Point (built when first needed).
+var rest_screen: RestScreenScript
 var encounter: RefCounted:
 	get:
 		return run_session.encounter if run_session != null else null
@@ -284,17 +287,26 @@ func _open_shop(state: RunStateScript, shop_data: ShopDataScript) -> void:
 
 
 func _on_map_safe_room_requested(_node: MapNodeDataScript, rest_data: RestSiteDataScript) -> void:
-	_set_scenery("saloon")
+	if rest_screen == null:
+		rest_screen = RestScreenScript.new()
+		rest_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+		rest_screen.visible = false
+		add_child(rest_screen)
+		move_child(rest_screen, interaction_view.get_index() + 1)
+	_set_scenery("rest")
 	selection_view.visible = false
 	combat_view.visible = false
 	map_view.visible = false
 	interaction_view.visible = true
 	interaction_view.open_safe_room(run_controller.run_state, rest_data)
+	rest_screen.open(interaction_view)
 
 
 func _on_interaction_finished(pending_encounter: EncounterDataScript) -> void:
 	if shop_screen != null:
 		shop_screen.close()
+	if rest_screen != null:
+		rest_screen.close()
 	if _shop_preview:
 		_shop_preview = false
 		show_selection()
@@ -338,9 +350,11 @@ func _set_scenery(kind: String) -> void:
 	table_stage.visible = kind == "table"
 	menu_backdrop.visible = kind in ["menu", "map"]
 	# the shop is its own 3D room; the gray panel only keeps the shop's rules
-	interaction_view.get_node("Panel").visible = kind != "shop"
+	interaction_view.get_node("Panel").visible = kind not in ["shop", "rest"]
 	if shop_screen != null:
 		shop_screen.visible = kind == "shop"
 	menu_backdrop.speed_scale = 1.0 if kind == "menu" else 0.35
 	if zone_screen != null:
 		zone_screen.visible = kind == "zone"
+	if rest_screen != null:
+		rest_screen.visible = kind == "rest"
