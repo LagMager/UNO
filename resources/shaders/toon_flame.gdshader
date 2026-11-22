@@ -1,24 +1,20 @@
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_opaque;
-// A drawn campfire: a few flame tongues filled with flat colors (red-orange, orange,
-// yellow core) and a thick ink outline, animated "on twos" like stop-motion.
+// A dark campfire: the flame is a column of heat torn up by rising noise. Deep reds at
+// the edges (almost soot), orange in the body and only a small, dim yellow heart.
+// Soft color blends on purpose: the screen's Bayer dither breaks them into dirty pixels.
 // The quad always turns to the camera around its vertical axis.
 
-uniform vec4 ink : source_color = vec4(0.16, 0.05, 0.03, 1.0);
-uniform vec4 outer : source_color = vec4(0.93, 0.3, 0.07, 1.0);
-uniform vec4 middle : source_color = vec4(1.0, 0.6, 0.14, 1.0);
-uniform vec4 core : source_color = vec4(1.0, 0.92, 0.6, 1.0);
-uniform float outline = 0.022;     // ink width, in UV (thicker read as a sticker)
+uniform vec4 soot : source_color = vec4(0.13, 0.025, 0.015, 1.0);
+uniform vec4 ember : source_color = vec4(0.48, 0.07, 0.02, 1.0);
+uniform vec4 body : source_color = vec4(0.85, 0.27, 0.05, 1.0);
+uniform vec4 heart : source_color = vec4(1.0, 0.62, 0.22, 1.0);
 uniform float intensity = 1.0;     // driven by the script: the fire breathes and flares
-uniform float fps = 6.0;           // stop-motion steps per second
-uniform float pace = 0.55;         // how fast the tongues sway (calm fire)
-uniform float pixels = 0.0;        // > 0: its own chunky grid (flame pixels across the quad)
-uniform float messy = 0.03;        // how ragged the edges are
+uniform float speed = 0.75;        // how fast the heat rises (calm fire)
 uniform float push = 0.0;          // meters toward the camera (the front layer wraps the logs)
-uniform float phase = 0.0;         // time offset, so two layers never move together
+uniform float phase = 0.0;         // time and noise offset, so two layers never match
 
 void vertex() {
-	// billboard around Y, keeping the node's scale
 	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(
 		vec4(normalize(cross(vec3(0.0, 1.0, 0.0), INV_VIEW_MATRIX[2].xyz)) * length(MODEL_MATRIX[0].xyz), 0.0),
 		vec4(0.0, length(MODEL_MATRIX[1].xyz), 0.0, 0.0),
@@ -28,32 +24,7 @@ void vertex() {
 	MODELVIEW_NORMAL_MATRIX = mat3(MODELVIEW_MATRIX);
 }
 
-float wob(float t, float k) {
-	return sin(t * 1.9 + k * 3.1) * 0.6 + sin(t * 3.3 + k * 1.7) * 0.3 + sin(t * 5.7 + k * 4.9) * 0.1;
-}
-
-// Signed "inside" amount of the whole flame (positive inside), scaled by s for the inner layers.
-float flame(vec2 p, float t, float s) {
-	float d = -1.0;
-	// four tongues: x offset, width, height
-	for (int i = 0; i < 4; i++) {
-		float k = float(i);
-		float xo = (k - 1.5) * 0.11 + wob(t, k + 10.0) * 0.02;
-		float w = (0.13 - abs(k - 1.5) * 0.02) * s;
-		float h = (0.62 - abs(k - 1.5) * 0.13 + wob(t, k) * 0.1) * s * intensity;
-		float y = p.y / max(h, 0.05);
-		if (y > 1.0) continue;
-		float sway = sin(p.y * 9.0 - t * 4.0 + k * 2.0) * 0.05 * p.y + wob(t, k + 5.0) * 0.03 * p.y;
-		float width = w * pow(max(1.0 - y, 0.0), 0.75) * (1.0 + 0.6 * smoothstep(0.0, 0.35, y) * (1.0 - y));
-		d = max(d, width - abs(p.x - xo * s - sway));
-	}
-	// the round bed where the tongues start
-	vec2 b = vec2(p.x / 0.28, (p.y - 0.06) / 0.13) / s;
-	d = max(d, (1.0 - length(b)) * 0.12 * s);
-	return d;
-}
-
-float cell_hash(vec2 p) {
+float hash(vec2 p) {
 	p = fract(p * vec2(233.34, 851.73));
 	p += dot(p, p + 23.45);
 	return fract(p.x * p.y);
@@ -63,40 +34,41 @@ float vnoise(vec2 p) {
 	vec2 i = floor(p);
 	vec2 f = fract(p);
 	f = f * f * (3.0 - 2.0 * f);
-	return mix(mix(cell_hash(i), cell_hash(i + vec2(1, 0)), f.x),
-		mix(cell_hash(i + vec2(0, 1)), cell_hash(i + vec2(1, 1)), f.x), f.y);
+	return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x),
+		mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+
+float fbm(vec2 p) {
+	float v = 0.0;
+	float a = 0.5;
+	for (int i = 0; i < 4; i++) {
+		v += a * vnoise(p);
+		p = p * 2.07 + vec2(1.7, 9.2);
+		a *= 0.5;
+	}
+	return v;
 }
 
 void fragment() {
-	float t = floor((TIME + phase) * fps) / fps * pace;
-	vec2 uv = UV;
-	if (pixels > 0.0) {
-		// optional chunky grid of its own (off by default: the screen's dither does the pixels)
-		vec2 cells = vec2(pixels, pixels * 1.4);
-		uv = (floor(UV * cells) + 0.5) / cells;
-	}
-	vec2 p = vec2(uv.x - 0.5, (1.0 - uv.y) * 1.4);   // p.y: 0 at the bottom
-	// ragged edges, re-rolled every step (boiling)
-	float step_id = floor((TIME + phase) * fps);
-	float j = (vnoise(p * 40.0 + step_id * 3.7) - 0.5) * messy;
-	float d0 = flame(p, t, 1.0) + j;
-	if (d0 < -outline) {
+	float t = (TIME + phase * 13.0) * speed;
+	vec2 p = vec2(UV.x - 0.5, 1.0 - UV.y);     // p.y: 0 at the bottom, 1 at the top
+	// the heat sways and is torn sideways more the higher it goes
+	float sway = (fbm(vec2(p.y * 1.5 - t * 0.6, phase * 5.0)) - 0.5) * 0.35 * p.y;
+	vec2 q = vec2(p.x - sway, p.y);
+	// a wide base narrowing to a ragged top
+	float width = 0.36 * pow(max(1.0 - p.y * 0.95, 0.0), 0.7) + 0.02;
+	float shape = 1.0 - abs(q.x) / width;
+	// rising turbulence eats the shape from the edges and breaks it into licks at the top
+	float n = fbm(vec2(q.x * 3.2 + phase * 7.0, q.y * 2.4 - t * 1.6));
+	float n2 = fbm(vec2(q.x * 7.0 - phase * 3.0, q.y * 5.0 - t * 2.6));
+	float heat = shape * (1.05 - p.y * 0.75) + (n - 0.5) * 0.9 + (n2 - 0.5) * 0.35;
+	heat *= 0.8 + 0.25 * intensity;
+	heat -= smoothstep(0.55, 1.0, p.y) * 0.5;   // nothing reaches the very top of the quad
+	if (heat < 0.18) {
 		discard;
 	}
-	vec3 c = ink.rgb;
-	if (d0 > 0.0) {
-		// soft blends between the layers (not hard steps): the screen's Bayer dither turns
-		// them into the same dirty, speckled pixels as the rest of the scene
-		float m1 = smoothstep(-0.03, 0.03, flame(p - vec2(0.0, 0.015), t + 0.37, 0.68) + j);
-		float m2 = smoothstep(-0.03, 0.03, flame(p - vec2(0.0, 0.02), t + 0.71, 0.38) + j);
-		c = mix(outer.rgb, middle.rgb, m1);
-		c = mix(c, core.rgb, m2);
-		// darker toward the tips and the edges, with blotchy grime inside
-		float tip = smoothstep(0.1, 0.75, p.y);
-		float edge = smoothstep(0.0, 0.06, d0);
-		float grime = vnoise(p * vec2(9.0, 6.0) + vec2(0.0, -step_id * 0.6));
-		c *= mix(0.55, 1.05, edge) * (1.0 - tip * 0.35) * (0.78 + grime * 0.4);
-		c *= 0.9 + 0.25 * intensity;
-	}
-	ALBEDO = c;
+	vec3 c = mix(soot.rgb, ember.rgb, smoothstep(0.18, 0.32, heat));
+	c = mix(c, body.rgb, smoothstep(0.34, 0.55, heat));
+	c = mix(c, heart.rgb, smoothstep(0.62, 0.9, heat) * (1.0 - p.y * 0.6));
+	ALBEDO = c * (0.85 + 0.2 * intensity);
 }
