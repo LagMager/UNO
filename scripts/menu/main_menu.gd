@@ -33,6 +33,7 @@ const PROPS := {
 	"bottle": preload("res://assets/models/menu/mn_bottle.glb"),
 	"window": preload("res://assets/models/menu/mn_window.glb"),
 	"door": preload("res://assets/models/menu/mn_door.glb"),
+	"streetlamp": preload("res://assets/models/menu/mn_streetlamp.glb"),
 }
 const SETTINGS_PATH := "user://settings.cfg"
 const SettingsScript = preload("res://scripts/menu/settings_panel.gd")
@@ -97,6 +98,10 @@ var _outside_light: SpotLight3D
 var _crack_mat: StandardMaterial3D
 var _cracks: Array[Node3D] = []
 var _lantern: OmniLight3D
+var _street_lights: Array[OmniLight3D] = []
+## Where the street lamps stand, from the door (x out along the road, z to either side).
+const STREET_LAMPS := [Vector3(2.4, 0, -1.4), Vector3(7.5, 0, 1.4), Vector3(13.0, 0, -1.4),
+	Vector3(19.0, 0, 1.4), Vector3(26.0, 0, -1.4), Vector3(34.0, 0, 1.4)]
 var _far_fire: OmniLight3D
 var _dragging_chips := false
 
@@ -459,7 +464,7 @@ func _build_door() -> void:
 	# outside: the painted moonlit road (Gemini), big and far, seen through the open door
 	var night := MeshInstance3D.new()
 	var nq := QuadMesh.new()
-	nq.size = Vector2(30, 16.7)
+	nq.size = Vector2(94, 52.4)
 	night.mesh = nq
 	var nm := StandardMaterial3D.new()
 	nm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -467,7 +472,7 @@ func _build_door() -> void:
 	nm.albedo_color = Color(0.55, 0.58, 0.68)    # deeper night than the painting
 	nm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	night.material_override = nm
-	night.position = DOOR_AT + Vector3(14.0, 2.45, 0)     # its horizon at eye height
+	night.position = DOOR_AT + Vector3(44.0, 4.3, 0)     # far back now, its horizon still at eye height
 	night.rotation.y = -PI * 0.5
 	_world.add_child(night)
 	var dirt := StandardMaterial3D.new()
@@ -476,7 +481,7 @@ func _build_door() -> void:
 	dirt.albedo_color = Color(0.36, 0.4, 0.52)
 	dirt.uv1_triplanar = true
 	dirt.uv1_world_triplanar = true
-	dirt.uv1_scale = Vector3(0.5, 0.5, 0.5)
+	dirt.uv1_scale = Vector3(0.4, 0.4, 0.4)
 	dirt.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON
 	dirt.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_build_outside(dirt)
@@ -516,10 +521,10 @@ func _build_outside(dirt: StandardMaterial3D) -> void:
 	noise.frequency = 0.35
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var nx := 56
+	var nx := 120
 	var nz := 60
-	var len_x := 14.0
-	var len_z := 30.0
+	var len_x := 44.0
+	var len_z := 40.0
 	var heights := []
 	for i: int in range(nx + 1):
 		var row := []
@@ -545,7 +550,7 @@ func _build_outside(dirt: StandardMaterial3D) -> void:
 				var road := 1.0 - smoothstep(0.55, 1.1, absf(v.z))
 				# moonlit dirt; the road paler; hollows darker, bumps catch the light
 				var shade := 0.85 + v.y * 0.9
-				st.set_color(Color(0.42, 0.44, 0.52).lerp(Color(0.6, 0.6, 0.66), road * 0.8) * shade)
+				st.set_color(Color(0.55, 0.57, 0.66).lerp(Color(0.78, 0.76, 0.8), road * 0.8) * shade)
 				st.add_vertex(DOOR_AT + v)
 	var ground := MeshInstance3D.new()
 	ground.mesh = st.commit()
@@ -579,20 +584,25 @@ func _build_outside(dirt: StandardMaterial3D) -> void:
 		tree.scale = Vector3.ONE * 0.8
 		for node in tree.find_children("*", "MeshInstance3D", true, false):
 			(node as MeshInstance3D).material_override = _flat(Color(0.14, 0.12, 0.12))
-	# a lantern hanging from a post by the road: warm light against the cold night
-	var post := _wood(Color(0.2, 0.13, 0.08))
-	var post_at := DOOR_AT + Vector3(2.2, 0, -1.3)
-	_box(Vector3(0.12, 2.5, 0.12), post_at + Vector3(0, 1.25, 0), post)
-	_box(Vector3(0.6, 0.08, 0.08), post_at + Vector3(0, 2.4, 0.26), post).rotation.y = PI * 0.5
-	var glass := _box(Vector3(0.14, 0.2, 0.14), post_at + Vector3(0, 2.15, 0.5), _flat(Color(1.0, 0.72, 0.38), true))
-	glass.name = "LanternGlass"
-	_lantern = OmniLight3D.new()
-	_lantern.light_color = Color("#ffa25a")
-	_lantern.light_energy = 1.3
-	_lantern.omni_range = 5.0
-	_lantern.shadow_enabled = true
-	_lantern.position = post_at + Vector3(0, 2.1, 0.5)
-	_world.add_child(_lantern)
+	# street lamps (Tripo) along the road, their lanterns over it, fading off into the dark:
+	# each one a warm pool on the cold ground, and the row of them gives the road its depth
+	for k: int in range(STREET_LAMPS.size()):
+		var spot: Vector3 = STREET_LAMPS[k]
+		var lamp := _prop("streetlamp", DOOR_AT + spot, -PI * 0.5 if spot.z < 0.0 else PI * 0.5, Vector3.ONE * 3.2)
+		var hang := lamp.global_transform * Vector3(0.112, 0.85, 0)     # the lantern, in the model
+		var glow := _box(Vector3(0.06, 0.1, 0.06), hang + Vector3(0, -0.02, 0), _flat(Color(1.0, 0.75, 0.4), true))
+		glow.name = "LampGlow"
+		var light := OmniLight3D.new()
+		light.light_color = Color("#ffa25a")
+		light.light_energy = 1.4
+		light.omni_range = 5.5
+		light.omni_attenuation = 1.3
+		light.shadow_enabled = k < 2          # only the near ones cast shadows
+		light.position = hang + Vector3(0, -0.1, 0)
+		_world.add_child(light)
+		_street_lights.append(light)
+		if k == 0:
+			_lantern = light
 	# a campfire far away on the plain, the only other light in the world
 	var ember := MeshInstance3D.new()
 	var es := SphereMesh.new()
@@ -600,7 +610,7 @@ func _build_outside(dirt: StandardMaterial3D) -> void:
 	es.height = 0.2
 	ember.mesh = es
 	ember.material_override = _flat(Color(1.0, 0.5, 0.18), true)
-	ember.position = DOOR_AT + Vector3(12.5, 0.4, 3.6)
+	ember.position = DOOR_AT + Vector3(21.0, 0.4, 5.5)
 	_world.add_child(ember)
 	_far_fire = OmniLight3D.new()
 	_far_fire.light_color = Color("#ff7a30")
@@ -613,14 +623,14 @@ func _build_outside(dirt: StandardMaterial3D) -> void:
 	moon.light_color = Color("#8ea4d8")
 	moon.light_energy = 0.75
 	moon.shadow_enabled = true
-	moon.directional_shadow_max_distance = 30.0
+	moon.directional_shadow_max_distance = 45.0
 	moon.light_volumetric_fog_energy = 1.5
 	_world.add_child(moon)
 	moon.look_at_from_position(DOOR_AT + Vector3(14, 9, -6), DOOR_AT + Vector3(2, 0, 1))
 	# a low mist creeping over the ground, pale in the moonlight
 	var mist := FogVolume.new()
-	mist.size = Vector3(13, 1.0, 16)
-	mist.position = DOOR_AT + Vector3(7.5, 0.25, 0)
+	mist.size = Vector3(42, 1.4, 40)
+	mist.position = DOOR_AT + Vector3(22.0, 0.3, 0)
 	var fm := FogMaterial.new()
 	fm.density = 0.25
 	fm.albedo = Color(0.55, 0.62, 0.8)
@@ -655,8 +665,9 @@ func _build_outside(dirt: StandardMaterial3D) -> void:
 	_world.add_child(dust)
 	# the backdrop behind the painting: its sky above, its ground below, very wide
 	var sky := _flat(Color(0.028, 0.045, 0.1), true)
-	_box(Vector3(0.1, 30, 80), DOOR_AT + Vector3(14.3, 14.0, 0), sky)
-	_box(Vector3(0.1, 4.0, 80), DOOR_AT + Vector3(14.2, -1.0, 0), _flat(Color(0.11, 0.12, 0.17), true))
+	_box(Vector3(0.1, 80, 220), DOOR_AT + Vector3(44.3, 30.0, 0), sky)
+	_box(Vector3(0.1, 8.0, 220), DOOR_AT + Vector3(44.2, -2.0, 0), _flat(Color(0.11, 0.12, 0.17), true))
+	_build_depth()
 
 
 # ------------------------------------------------------------------ the room's clutter
@@ -1092,7 +1103,7 @@ func _update_camera(delta: float) -> void:
 			open = 1.0 - exp(-7.0 * kick) * cos(16.0 * kick)
 			bob += Vector3(sin(kick * 60.0), cos(kick * 47.0), 0) * 0.03 * exp(-10.0 * kick)
 		_door.rotation.y = -1.7 * open
-		_outside_light.light_energy = 1.8 * clampf(open, 0.0, 1.0)
+		_outside_light.light_energy = 0.0      # the night stays outside: no beam through the door
 		for c: Node3D in _cracks:
 			c.visible = open < 0.05
 		if _walk > 3.6:
@@ -1174,8 +1185,8 @@ func _update_corner(delta: float) -> void:
 	for k: int in range(_chips.size()):
 		_chip_drop[k] = move_toward(_chip_drop[k], 0.0, delta * 0.6)
 		_chips[k].position = CHIPS_AT + Vector3(sin(k * 2.3) * 0.004, CHIP_H * (k + 0.5) + _chip_drop[k], cos(k * 1.7) * 0.004)
-	if _lantern != null:
-		_lantern.light_energy = 1.3 * (0.85 + 0.15 * sin(_time * 8.3) * sin(_time * 3.1))
+	for k: int in range(_street_lights.size()):
+		_street_lights[k].light_energy = 1.4 * (0.85 + 0.15 * sin(_time * (8.3 + k) + k) * sin(_time * 3.1 + k * 2.0))
 	if _far_fire != null:
 		_far_fire.light_energy = 0.9 * (0.7 + 0.3 * sin(_time * 5.7) * sin(_time * 2.3))
 	var leak := 0.8 + 0.1 * sin(_time * 0.7)
@@ -1591,3 +1602,133 @@ func _update_drawer(delta: float) -> void:
 		if not up and _held_t <= 0.0:
 			_held.visible = false
 			_slot_papers[_load_slot].visible = true
+
+
+# ------------------------------------------------------------------ the night outside, in depth
+## Between the door and the painted horizon: low ridges one behind the other, each paler and
+## bluer than the one in front (the air between), mesquite thickets and trees crowding both
+## sides of the road, near ones dark and sharp, far ones fading, and grass along the way.
+func _build_depth() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1879
+	var noise := FastNoiseLite.new()
+	noise.seed = 9
+	noise.frequency = 0.05
+	var near_col := Color(0.07, 0.075, 0.1)
+	var far_col := Color(0.12, 0.14, 0.22)
+	# ridges: x (distance), height, how rough
+	for r: Array in [[17.0, 1.4, 0.6], [24.0, 2.6, 1.0], [31.0, 3.8, 1.4], [38.0, 5.5, 2.0]]:
+		var x: float = r[0]
+		var col := near_col.lerp(far_col, (x - 17.0) / 21.0)
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var n := 90
+		for i: int in range(n):
+			var z0 := -60.0 + i * 120.0 / n
+			var z1 := -60.0 + (i + 1) * 120.0 / n
+			# a gap where the road runs through, the ridge rising away from it
+			var h0: float = (float(r[1]) + noise.get_noise_2d(x * 3.0, z0) * float(r[2])) * smoothstep(1.5, 9.0, absf(z0))
+			var h1: float = (float(r[1]) + noise.get_noise_2d(x * 3.0, z1) * float(r[2])) * smoothstep(1.5, 9.0, absf(z1))
+			for v: Vector3 in [Vector3(x, -0.5, z0), Vector3(x, h0, z0), Vector3(x, h1, z1),
+					Vector3(x, -0.5, z0), Vector3(x, h1, z1), Vector3(x, -0.5, z1)]:
+				st.add_vertex(DOOR_AT + v)
+		st.generate_normals()          # the texture is laid by facing (triplanar)
+		var ridge := MeshInstance3D.new()
+		ridge.mesh = st.commit()
+		# the cave rock texture, washed toward the air's blue the farther back it stands
+		var m := _flat(col * 2.6, true)
+		m.albedo_texture = preload("res://assets/textures/zones/cave_rock.png")
+		m.uv1_triplanar = true
+		m.uv1_world_triplanar = true
+		m.uv1_scale = Vector3.ONE * lerpf(0.35, 0.14, (x - 17.0) / 21.0)
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		ridge.material_override = m
+		_world.add_child(ridge)
+	# mesquite: a dead tree's twisted trunk with dark, ragged crowns of leaves
+	var leaf_near := Color(0.1, 0.13, 0.1)
+	var tree_scene := preload("res://assets/models/zones/rest_point/rp_tree.glb") as PackedScene
+	var placed := 0
+	while placed < 46:
+		var x := rng.randf_range(3.0, 36.0)
+		var side := 1.0 if rng.randf() < 0.5 else -1.0
+		var z := side * rng.randf_range(2.6, 4.0 + x * 0.5)
+		if Vector2(x, z).distance_to(Vector2(21.0, 5.5)) < 2.0:
+			continue          # leave the far campfire clear
+		var fade := smoothstep(4.0, 36.0, x)
+		var col := leaf_near.lerp(far_col, fade * 0.8)
+		var tree := tree_scene.instantiate() as Node3D
+		_world.add_child(tree)
+		var s := rng.randf_range(0.6, 1.1)
+		tree.position = DOOR_AT + Vector3(x, 0, z)
+		tree.rotation.y = rng.randf() * TAU
+		tree.scale = Vector3.ONE * s
+		var bark := _flat(Color(0.1, 0.09, 0.09).lerp(far_col, fade * 0.8))
+		for node in tree.find_children("*", "MeshInstance3D", true, false):
+			(node as MeshInstance3D).material_override = bark
+		# its crown: a few squashed, faceted blobs round the top of the branches
+		var leaves := _flat(col)
+		for k: int in range(rng.randi_range(4, 7)):
+			var blob := MeshInstance3D.new()
+			var sm := SphereMesh.new()
+			sm.radius = rng.randf_range(0.35, 0.6) * s
+			sm.height = sm.radius * 1.1
+			sm.radial_segments = 7
+			sm.rings = 4
+			blob.mesh = sm
+			blob.material_override = leaves
+			blob.position = DOOR_AT + Vector3(x, 0, z) + Vector3(rng.randf_range(-0.7, 0.7), rng.randf_range(1.9, 2.6), rng.randf_range(-0.7, 0.7)) * s
+			_world.add_child(blob)
+		placed += 1
+	# thickets: low clumps of brush between the trees, thick by the road, all the way back
+	var clump := SphereMesh.new()
+	clump.radius = 0.35
+	clump.height = 0.45
+	clump.radial_segments = 6
+	clump.rings = 3
+	var spots: Array[Transform3D] = []
+	for k: int in range(260):
+		var x := rng.randf_range(1.5, 40.0)
+		var z := (1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(1.5, 3.0 + x * 0.6)
+		var sc := rng.randf_range(0.6, 1.6) * (1.0 + x * 0.02)
+		spots.append(Transform3D(Basis.from_scale(Vector3(sc * 1.3, sc, sc * 1.3)), DOOR_AT + Vector3(x, 0.12 * sc, z)))
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = clump
+	mm.instance_count = spots.size()
+	for k: int in range(spots.size()):
+		mm.set_instance_transform(k, spots[k])
+		var fade := smoothstep(2.0, 40.0, spots[k].origin.x - DOOR_AT.x)
+		mm.set_instance_color(k, Color(0.11, 0.13, 0.1).lerp(far_col, fade * 0.85) * rng.randf_range(0.8, 1.2))
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	var cm := StandardMaterial3D.new()
+	cm.vertex_color_use_as_albedo = true
+	cm.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON
+	mmi.material_override = cm
+	_world.add_child(mmi)
+	# grass along the road, catching the lamplight
+	var blade := QuadMesh.new()
+	blade.size = Vector2(0.05, 0.3)
+	var gspots: Array[Transform3D] = []
+	for k: int in range(900):
+		var x := rng.randf_range(0.8, 30.0)
+		var z := (1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(0.9, 4.0)
+		var b := Basis(Vector3.UP, rng.randf() * TAU) * Basis(Vector3.FORWARD, rng.randf_range(-0.4, 0.4))
+		gspots.append(Transform3D(b.scaled(Vector3.ONE * rng.randf_range(0.6, 1.4)), DOOR_AT + Vector3(x, 0.12, z)))
+	var gm := MultiMesh.new()
+	gm.transform_format = MultiMesh.TRANSFORM_3D
+	gm.mesh = blade
+	gm.instance_count = gspots.size()
+	for k: int in range(gspots.size()):
+		gm.set_instance_transform(k, gspots[k])
+	var gmi := MultiMeshInstance3D.new()
+	gmi.multimesh = gm
+	var grass := StandardMaterial3D.new()
+	grass.albedo_color = Color(0.3, 0.32, 0.24)
+	grass.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON
+	grass.cull_mode = BaseMaterial3D.CULL_DISABLED
+	gmi.material_override = grass
+	gmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_world.add_child(gmi)
