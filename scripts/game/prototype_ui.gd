@@ -24,6 +24,7 @@ const MenuBackdropScript = preload("res://scripts/menu/menu_backdrop.gd")
 const TableStageScript = preload("res://scripts/game/ui/table_stage.gd")
 const WildPickerScript = preload("res://scripts/game/ui/wild_picker.gd")
 const ShopScreenScript = preload("res://scripts/run/ui/shop_screen.gd")
+const ZoneScreenScript = preload("res://scripts/zones/zone_screen.gd")
 ## Gold and health for a shop opened from the menu (just to look around).
 const PREVIEW_GOLD := 100
 const PREVIEW_WOUNDS := 6
@@ -33,6 +34,7 @@ var run_controller: RunControllerScript
 var decision_runner_factory: Callable = Callable()
 var shop_screen: ShopScreenScript
 var _shop_preview := false
+var zone_screen: ZoneScreenScript
 var encounter: RefCounted:
 	get:
 		return run_session.encounter if run_session != null else null
@@ -80,6 +82,7 @@ func _ready() -> void:
 	add_child(shop_screen)
 	move_child(shop_screen, interaction_view.get_index() + 1)
 	selection_view.shop_requested.connect(open_shop_preview)
+	selection_view.zone_requested.connect(open_zone_preview)
 	update_layout()
 
 
@@ -248,6 +251,27 @@ func open_shop_preview() -> void:
 	_open_shop(state, ShopDataScript.new())
 
 
+## A zone on its own, from the main menu (built lazily: it is a whole 3D scene).
+func open_zone_preview(_zone_id: String) -> void:
+	if zone_screen == null:
+		zone_screen = ZoneScreenScript.new()
+		zone_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+		add_child(zone_screen)
+		zone_screen.closed.connect(close_zone_preview)
+	_set_scenery("zone")
+	selection_view.visible = false
+	combat_view.visible = false
+	map_view.visible = false
+	interaction_view.visible = false
+
+
+func close_zone_preview() -> void:
+	if zone_screen != null:
+		zone_screen.queue_free()
+		zone_screen = null
+	show_selection()
+
+
 func _open_shop(state: RunStateScript, shop_data: ShopDataScript) -> void:
 	_set_scenery("shop")
 	selection_view.visible = false
@@ -318,3 +342,5 @@ func _set_scenery(kind: String) -> void:
 	if shop_screen != null:
 		shop_screen.visible = kind == "shop"
 	menu_backdrop.speed_scale = 1.0 if kind == "menu" else 0.35
+	if zone_screen != null:
+		zone_screen.visible = kind == "zone"
