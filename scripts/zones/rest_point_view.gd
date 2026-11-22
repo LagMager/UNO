@@ -6,6 +6,13 @@ extends SubViewportContainer
 ## sky are the only lights. It is always night.
 ## Seen in first person, with the same pixelated, dithered look as the duel and the shop.
 ## In the viewer the camera can be turned by dragging the mouse (R recenters it).
+## The same rest changes with the circle you are in (set `circle` before adding it):
+##  0 The Mesquite: the starry night above.
+##  1 Limbo: a green meadow under a dome of cold artificial light, the castle of seven walls
+##    far off (Dante), and at the edges the doc's burnt frontier: broken rails, a gallows.
+##  2 Lust: open and dark, an endless gale of sand and ash dragging the souls past.
+enum Circle { MESQUITE, LIMBO, LUST }
+var circle := Circle.MESQUITE
 
 const TREE_SCENE := preload("res://assets/models/zones/rest_point/rp_tree.glb")
 const FIRE_SCENE := preload("res://assets/models/zones/rest_point/rp_campfire.glb")
@@ -99,13 +106,26 @@ func _ready() -> void:
 	_build_environment()
 	_build_ground()
 	_build_tree()
-	_build_far_trees()
 	_build_fire()
-	_world.add_child(_dust())
-	_world.add_child(_fireflies())
 	_build_rocks()
-	_build_grass()
-	_build_brush()
+	match circle:
+		Circle.LIMBO:
+			_build_far_trees(4)
+			_world.add_child(_dust())
+			_build_grass(260, Color(0.2, 0.38, 0.14), Color(0.42, 0.66, 0.28), 0.0)
+			_build_brush(50)
+			_build_limbo()
+		Circle.LUST:
+			_build_far_trees(0)
+			_build_grass(90, Color(0.3, 0.24, 0.18), Color(0.48, 0.4, 0.3), 0.55)
+			_build_brush(70)
+			_build_lust()
+		_:
+			_build_far_trees(FAR_TREES.size())
+			_world.add_child(_dust())
+			_world.add_child(_fireflies())
+			_build_grass(110, Color(0.55, 0.47, 0.3), Color(0.8, 0.7, 0.45), 0.0)
+			_build_brush(180)
 	_build_body()
 
 
@@ -135,6 +155,39 @@ func _build_environment() -> void:
 	env.fog_depth_end = 26.0
 	env.fog_depth_curve = 0.7
 	env.fog_sky_affect = 0.0
+	match circle:
+		Circle.LIMBO:
+			# no stars: a dome of pale, sourceless light, brighter overhead than at the horizon
+			sky_mat.set_shader_parameter("zenith", Color(0.6, 0.66, 0.5))
+			sky_mat.set_shader_parameter("horizon", Color(0.27, 0.33, 0.25))
+			sky_mat.set_shader_parameter("band_color", Color(0, 0, 0))
+			sky_mat.set_shader_parameter("brightness", 0.0)
+			env.ambient_light_color = Color("#9fb38c")
+			env.ambient_light_energy = 0.45
+			env.fog_light_color = Color(0.36, 0.42, 0.32)
+			env.fog_depth_begin = 10.0
+			env.fog_depth_end = 85.0
+			env.fog_depth_curve = 1.2
+			var dome := DirectionalLight3D.new()
+			dome.light_color = Color("#dfe8c8")
+			dome.light_energy = 0.55
+			dome.shadow_enabled = true
+			dome.rotation_degrees = Vector3(-72, 20, 0)
+			_world.add_child(dome)
+		Circle.LUST:
+			# clouds of dust: no sky, only a dirty brown glow low down
+			sky_mat.set_shader_parameter("zenith", Color(0.02, 0.015, 0.018))
+			sky_mat.set_shader_parameter("horizon", Color(0.11, 0.075, 0.055))
+			sky_mat.set_shader_parameter("band_color", Color(0, 0, 0))
+			sky_mat.set_shader_parameter("brightness", 0.0)
+			# enough light to read the rock all round: a dull red glow, and the haze only
+			# swallows what is beyond the walls
+			env.ambient_light_color = Color("#8a5246")
+			env.ambient_light_energy = 0.38
+			env.fog_light_color = Color(0.12, 0.07, 0.06)
+			env.fog_depth_begin = 9.0
+			env.fog_depth_end = 34.0
+			env.fog_depth_curve = 1.4
 	var we := WorldEnvironment.new()
 	we.environment = env
 	_world.add_child(we)
@@ -210,7 +263,12 @@ func _build_ground() -> void:
 			st.add_index(a + n + 1)
 	var ground := MeshInstance3D.new()
 	ground.mesh = st.commit()
-	var m := _toon(GROUND_TEX, Color(0.85, 0.82, 0.8))
+	var tint := Color(0.85, 0.82, 0.8)
+	if circle == Circle.LIMBO:
+		tint = Color(0.5, 0.68, 0.4)          # grass all over
+	elif circle == Circle.LUST:
+		tint = Color(0.6, 0.5, 0.45)
+	var m := _toon(GROUND_TEX, tint)
 	m.texture_repeat = true
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	ground.material_override = m
@@ -225,8 +283,8 @@ func _build_tree() -> void:
 	_stylize(tree, Color(0.95, 0.92, 0.9), 0.008)
 
 
-func _build_far_trees() -> void:
-	for t: Array in FAR_TREES:
+func _build_far_trees(count: int) -> void:
+	for t: Array in FAR_TREES.slice(0, count):
 		var at: Vector3 = t[0]
 		var tree := TREE_SCENE.instantiate() as Node3D
 		_world.add_child(tree)
@@ -353,6 +411,8 @@ func _build_rocks() -> void:
 		if src != null:
 			stone = src.albedo_texture
 	pit.free()
+	if circle == Circle.LUST:
+		stone = CAVE_TEX          # the same rock as the pit walls
 	var m := _toon(stone, Color(1.15, 1.1, 1.05), 0.03)
 	m.uv1_triplanar = true
 	m.uv1_scale = Vector3(0.8, 0.8, 0.8)
@@ -426,7 +486,7 @@ func _branch(st: SurfaceTool, rng: RandomNumberGenerator, from: Vector3, dir: Ve
 		_branch(st, rng, to, d2, length * rng.randf_range(0.6, 0.8), r2, depth - 1)
 
 
-func _build_brush() -> void:
+func _build_brush(count: int) -> void:
 	var meshes: Array[ArrayMesh] = []
 	for s: int in range(3):
 		meshes.append(_shrub_mesh(500 + s * 37))
@@ -436,10 +496,10 @@ func _build_brush() -> void:
 	var fire2 := Vector2(FIRE_AT.x, FIRE_AT.z)
 	var tries := 0
 	var placed := 0
-	while placed < 180 and tries < 4000:
+	while placed < count and tries < 4000:
 		tries += 1
 		var at: Vector2
-		if placed < 30:
+		if placed < mini(30, count / 3):
 			# the brush you walk through on the way in: close on both sides of the path
 			var u := rng.randf_range(0.05, 1.1)
 			var off := rng.randf_range(0.95, 2.6) * (1.0 if rng.randf() < 0.5 else -1.0)
@@ -472,7 +532,7 @@ func _build_brush() -> void:
 
 
 ## Tufts of dry grass: thin straw blades fanning out, scattered in clumps.
-func _grass_mesh() -> ArrayMesh:
+func _grass_mesh(low: Color, high: Color) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rng := RandomNumberGenerator.new()
@@ -486,26 +546,27 @@ func _grass_mesh() -> ArrayMesh:
 		var base := dir * rng.randf_range(0.0, 0.05)
 		var tip := base + dir * lean * h + Vector3.UP * h
 		var shade := rng.randf_range(0.75, 1.0)
-		st.set_color(Color(shade * 0.55, shade * 0.47, shade * 0.3))
+		st.set_color(low * shade)
 		st.set_normal(Vector3.UP)
 		st.add_vertex(base - side)
 		st.set_normal(Vector3.UP)
 		st.add_vertex(base + side)
-		st.set_color(Color(shade * 0.8, shade * 0.7, shade * 0.45))
+		st.set_color(high * shade)
 		st.set_normal(Vector3.UP)
 		st.add_vertex(tip)
 	return st.commit()
 
 
-func _build_grass() -> void:
+## lean: radians the blades are bent toward +x (the wind in Lust).
+func _build_grass(clumps: int, low: Color, high: Color, lean: float) -> void:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = _grass_mesh()
+	mm.mesh = _grass_mesh(Color(low, 1.0), Color(high, 1.0))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
 	var spots: Array[Transform3D] = []
 	# clumps: a few centers, several tufts around each
-	for c: int in range(110):
+	for c: int in range(clumps):
 		var ang := rng.randf() * TAU
 		var dist := rng.randf_range(2.0, 20.0)
 		var center := Vector2(CLEARING.x, CLEARING.y) + Vector2(cos(ang), sin(ang)) * dist
@@ -513,7 +574,7 @@ func _build_grass() -> void:
 			var at := center + Vector2(rng.randf_range(-0.7, 0.7), rng.randf_range(-0.7, 0.7))
 			if at.distance_to(Vector2(0, 0)) < 1.2 or at.distance_to(Vector2(FIRE_AT.x, FIRE_AT.z)) < 1.1 or _on_path(at):
 				continue
-			var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.7, 1.4))
+			var b := Basis(Vector3.BACK, -lean * rng.randf_range(0.7, 1.2)) * Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.7, 1.4))
 			spots.append(Transform3D(b, Vector3(at.x, height_at(at.x, at.y), at.y)))
 	mm.instance_count = spots.size()
 	for i: int in range(spots.size()):
@@ -768,6 +829,14 @@ func _update_fire(delta: float) -> void:
 	# the light's center leans with the flames, so shadows sway instead of jumping
 	_fire_light.position = FIRE_AT + Vector3(mid * 0.08, 0.7 + slow * 0.06 + _flare * 0.1, _n_fire.get_noise_1d(_time * 0.6 + 20.0) * 0.05)
 	_ember_fx.amount_ratio = clampf(0.6 + _flare * 0.6, 0.0, 1.0)
+	if circle == Circle.LUST:
+		# the gusts beat the fire down and it flares back up between them
+		_gust = clampf(_n_fire.get_noise_1d(_time * 0.35 + 300.0) * 1.4 + 0.45, 0.0, 1.0)
+		_fire_light.light_energy *= 1.0 - _gust * 0.3 + shiver * 0.15
+		_fire_light.position.x += _gust * 0.25
+		_ember_fx.amount_ratio = 1.0
+		for w: GPUParticles3D in _wind_fx: w.speed_scale = 0.75 + _gust * 0.6
+		for s: GPUParticles3D in _souls_fx: s.speed_scale = 0.8 + _gust * 0.4
 
 
 func _on_path(at: Vector2) -> bool:
@@ -1116,6 +1185,10 @@ func _update_camera(delta: float) -> void:
 		_head_noise.get_noise_1d(_time * 0.6 + 40.0) * 0.07,
 		0.0) * tired
 	roll += _head_noise.get_noise_1d(_time * 0.5 + 90.0) * 0.012 * tired
+	if circle == Circle.LUST:
+		# the wind shoves you a little
+		drift += Vector3(_head_noise.get_noise_1d(_time * 3.0 + 7.0), _head_noise.get_noise_1d(_time * 2.6 + 70.0) * 0.5, 0) * 0.03 * _gust
+		roll += _head_noise.get_noise_1d(_time * 2.2 + 140.0) * 0.012 * _gust
 	var look := _look_p + drift
 	var fwd := (look - eye).normalized()
 	var b2 := Basis.looking_at(fwd, Vector3.UP) * Basis(Vector3.FORWARD, roll)
@@ -1137,3 +1210,457 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if is_visible_in_tree() and event.pressed and event is InputEventKey and event.keycode == KEY_R:
 		_want_yaw = 0.0
 		_want_pitch = 0.0
+
+
+# ------------------------------------------------------------------ fire colours
+## Each circle burns its own fire: the Mesquite's warm orange, Limbo's cold pale flame (a
+## light without heat), Lust's feverish crimson.
+func _tint_fire(heart: Color, body: Color, ember: Color, soot: Color, light: Color, glow: Color) -> void:
+	for fm: ShaderMaterial in [_flame_mat, _flame_front_mat]:
+		fm.set_shader_parameter("heart", heart)
+		fm.set_shader_parameter("body", body)
+		fm.set_shader_parameter("ember", ember)
+		fm.set_shader_parameter("soot", soot)
+	_fire_light.light_color = light
+	_glow_light.light_color = glow
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(heart, 1.0))
+	ramp.set_color(1, Color(body, 0.0))
+	var rt := GradientTexture1D.new()
+	rt.gradient = ramp
+	(_ember_fx.process_material as ParticleProcessMaterial).color_ramp = rt
+
+
+# ------------------------------------------------------------------ Limbo
+## Inside the first circle, Dante's "noble castle" seven times walled: the castle on a rise far
+## off in the haze, ringed by seven walls, each higher than the one outside it. Toward the
+## edges, the doc's burnt frontier: a broken railway crossing the meadow and a gallows.
+const CASTLE_SCENE := preload("res://assets/models/zones/limbo/lb_castle.glb")
+const WALL_TEX := preload("res://assets/textures/zones/castle_wall.png")
+const CAVE_TEX := preload("res://assets/textures/zones/cave_rock.png")
+
+
+func _build_limbo() -> void:
+	_tint_fire(Color(0.92, 1.0, 0.92), Color(0.5, 0.78, 0.66), Color(0.16, 0.34, 0.3), Color(0.04, 0.08, 0.08),
+		Color("#cfeedd"), Color("#a8d8c0"))
+	var center := Vector3(9.0, 0.0, -64.0)
+	center.y = height_at(center.x, center.z) - 0.5
+	var wall := _toon(WALL_TEX, Color(0.95, 0.95, 0.9), 0.0)
+	wall.uv1_triplanar = true
+	wall.uv1_scale = Vector3(0.25, 0.25, 0.25)
+	var walls: Array[Transform3D] = []
+	var towers: Array[Transform3D] = []
+	for ring: int in range(7):
+		var r := 34.0 - ring * 2.6
+		var h := 3.0 + ring * 0.9
+		var lift := ring * 0.9          # each ring stands on a higher terrace
+		var segs := 40 - ring * 3
+		for s: int in range(segs):
+			var a0 := TAU * s / segs
+			var a1 := TAU * (s + 1) / segs
+			var p0 := Vector3(cos(a0), 0, sin(a0)) * r
+			var p1 := Vector3(cos(a1), 0, sin(a1)) * r
+			var along := p1 - p0
+			var b := Basis.looking_at(along.normalized(), Vector3.UP) * Basis.from_scale(Vector3(1.0, h, along.length() + 0.1))
+			walls.append(Transform3D(b, center + (p0 + p1) * 0.5 + Vector3(0, lift + h * 0.5, 0)))
+			if s % 5 == 0:
+				var th := h + 2.2
+				towers.append(Transform3D(Basis.from_scale(Vector3(1.6, th, 1.6)), center + p0 + Vector3(0, lift + th * 0.5, 0)))
+	_multi(BoxMesh.new(), walls, wall)
+	_multi(BoxMesh.new(), towers, wall)
+	# the castle itself (Tripo), standing on the top terrace
+	var castle := CASTLE_SCENE.instantiate() as Node3D
+	_world.add_child(castle)
+	castle.scale = Vector3.ONE * 30.0
+	castle.position = center + Vector3(0, 7 * 0.9 - 0.5, 0)
+	castle.rotation_degrees.y = -20.0
+	_stylize(castle, Color(0.95, 0.97, 0.9), 0.0)
+	_build_inner_wall()
+	_build_rails()
+	_build_gallows(Vector3(-8.5, 0.0, -13.5))
+
+
+## The innermost wall, all round you: the meadow is inside the castle (in Dante you pass seven
+## gates to reach it). Battlements on top, towers, and the open gate behind you, where you
+## came in.
+const INNER_R := 17.0
+const INNER_H := 7.0
+
+
+func _build_inner_wall() -> void:
+	var wall := _toon(WALL_TEX, Color(0.95, 0.95, 0.9), 0.0)
+	wall.uv1_triplanar = true
+	wall.uv1_scale = Vector3(0.3, 0.3, 0.3)
+	var c := Vector3(CLEARING.x, 0, CLEARING.y)
+	var segs := 72
+	var gate := PI * 0.5 - TAU / segs * 0.5        # the segment straight behind you
+	var blocks: Array[Transform3D] = []
+	var merlons: Array[Transform3D] = []
+	var towers: Array[Transform3D] = []
+	for s: int in range(segs):
+		var a0 := TAU * s / segs
+		var a1 := TAU * (s + 1) / segs
+		var mid := (a0 + a1) * 0.5
+		var p0 := c + Vector3(cos(a0), 0, sin(a0)) * INNER_R
+		var p1 := c + Vector3(cos(a1), 0, sin(a1)) * INNER_R
+		var along := p1 - p0
+		var base := minf(height_at(p0.x, p0.z), height_at(p1.x, p1.z)) - 0.5
+		var basis := Basis.looking_at(along.normalized(), Vector3.UP)
+		var centre := (p0 + p1) * 0.5
+		var is_gate := absf(angle_difference(mid, gate)) < TAU / segs * 1.1
+		if is_gate:
+			# the arch over the open gate
+			blocks.append(Transform3D(basis * Basis.from_scale(Vector3(1.4, 2.0, along.length() + 0.1)), Vector3(centre.x, base + INNER_H - 1.0, centre.z)))
+		else:
+			blocks.append(Transform3D(basis * Basis.from_scale(Vector3(1.4, INNER_H, along.length() + 0.1)), Vector3(centre.x, base + INNER_H * 0.5, centre.z)))
+		# two merlons per stretch
+		for k: float in [0.25, 0.75]:
+			var q := p0.lerp(p1, k)
+			merlons.append(Transform3D(basis * Basis.from_scale(Vector3(1.4, 0.8, 0.55)), Vector3(q.x, base + INNER_H + 0.4, q.z)))
+		if s % 9 == 0 or absf(angle_difference(a0, gate - TAU / segs)) < 0.01 or absf(angle_difference(a0, gate + TAU / segs * 2.0)) < 0.01:
+			towers.append(Transform3D(Basis.from_scale(Vector3(2.6, (INNER_H + 3.0) * 0.5, 2.6)), Vector3(p0.x, base + (INNER_H + 3.0) * 0.5, p0.z)))
+	_multi(BoxMesh.new(), blocks, wall)
+	_multi(BoxMesh.new(), merlons, wall)
+	var tower := CylinderMesh.new()
+	tower.top_radius = 0.5
+	tower.bottom_radius = 0.55
+	tower.radial_segments = 10
+	_multi(tower, towers, wall)
+
+
+func _multi(mesh: Mesh, at: Array[Transform3D], mat: Material) -> MultiMeshInstance3D:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = at.size()
+	for i: int in range(at.size()):
+		mm.set_instance_transform(i, at[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.material_override = mat
+	_world.add_child(mmi)
+	return mmi
+
+
+func _rail_z(x: float) -> float:
+	return -12.5 + sin(x * 0.05) * 2.5
+
+
+## A railway across the meadow, left to right in front of the castle: rusted rails, rotten
+## ties, with gaps where it is torn up and a few rails bent loose.
+func _build_rails() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1879
+	var rail := BoxMesh.new()
+	rail.size = Vector3(1.0, 0.09, 0.07)
+	var tie := BoxMesh.new()
+	tie.size = Vector3(0.22, 0.08, 1.9)
+	var rails: Array[Transform3D] = []
+	var ties: Array[Transform3D] = []
+	var x := -14.0
+	while x < 14.0:
+		var broken := absf(x - 5.0) < 2.0 or absf(x + 9.0) < 1.5     # torn up here
+		var z := _rail_z(x)
+		var dir := Vector3(1.0, 0, _rail_z(x + 1.0) - z).normalized()
+		var side := dir.cross(Vector3.UP)
+		var yaw := atan2(-dir.z, dir.x)
+		if not broken:
+			ties.append(Transform3D(Basis(Vector3.UP, yaw + rng.randf_range(-0.15, 0.15)), Vector3(x, height_at(x, z) + 0.02, z)))
+			for k: float in [-0.72, 0.72]:
+				var p := Vector3(x + 0.5, 0, z) + side * k
+				var b := Basis(Vector3.UP, yaw)
+				if rng.randf() < 0.06:
+					b = b * Basis(Vector3.FORWARD, rng.randf_range(0.2, 0.5))      # bent up, loose
+				rails.append(Transform3D(b, Vector3(p.x, height_at(p.x, p.z) + 0.1, p.z)))
+		x += 1.0
+	_multi(rail, rails, _toon(null, Color(0.32, 0.2, 0.14), 0.0))
+	_multi(tie, ties, _toon(null, Color(0.26, 0.2, 0.15), 0.0))
+
+
+func _build_gallows(at: Vector3) -> void:
+	at.y = height_at(at.x, at.z)
+	var wood := _toon(null, Color(0.22, 0.17, 0.13), 0.0)
+	var root := Node3D.new()
+	root.position = at
+	root.rotation_degrees.y = 25.0
+	_world.add_child(root)
+	for part: Array in [
+			[Vector3(0.35, 5.0, 0.35), Vector3(0, 2.5, 0), 0.0],          # the post
+			[Vector3(2.6, 0.3, 0.3), Vector3(1.15, 4.9, 0), 0.0],          # the beam
+			[Vector3(0.22, 1.5, 0.22), Vector3(0.5, 4.3, 0), -45.0],       # the brace
+			[Vector3(0.04, 1.2, 0.04), Vector3(2.2, 4.15, 0), 0.0],        # the rope
+			[Vector3(2.4, 0.3, 2.0), Vector3(1.4, 0.15, 0), 0.0]]:         # the platform
+		var mi := MeshInstance3D.new()
+		var b := BoxMesh.new()
+		b.size = part[0]
+		mi.mesh = b
+		mi.material_override = wood
+		mi.position = part[1]
+		mi.rotation_degrees.z = part[2]
+		root.add_child(mi)
+	var noose := MeshInstance3D.new()
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.14
+	ring.outer_radius = 0.19
+	noose.mesh = ring
+	noose.material_override = wood
+	noose.position = Vector3(2.2, 3.4, 0)
+	noose.rotation_degrees.x = 90.0
+	root.add_child(noose)
+
+
+# ------------------------------------------------------------------ Lust
+## "A place mute of all light": you rest at the bottom of a pit of rock. The walls rise close
+## all round and lean in over you until only a ragged hole of dirty sky is left, and inside
+## it the gale goes round and round without end, sand and ash and the souls with it.
+var _gust := 0.0
+var _wind_fx: Array[GPUParticles3D] = []
+var _souls_fx: Array[GPUParticles3D] = []
+const PIT_CENTER := Vector2(0.2, -3.2)
+const PIT_R := 8.5            # the walls stand this far from the middle (the way in fits)
+const PIT_H := 6.2           # the roof: low, right over you
+
+
+func _build_lust() -> void:
+	_tint_fire(Color(1.0, 0.6, 0.62), Color(0.78, 0.08, 0.2), Color(0.36, 0.02, 0.08), Color(0.1, 0.0, 0.03),
+		Color("#ff3c58"), Color("#e0284a"))
+	var em := _ember_fx.process_material as ParticleProcessMaterial
+	em.gravity = Vector3(2.2, 0.25, 0.3)
+	em.initial_velocity_min = 0.5
+	em.initial_velocity_max = 1.2
+	_ember_fx.amount = 26
+	_ember_fx.lifetime = 2.5
+	for fm: ShaderMaterial in [_flame_mat, _flame_front_mat]:
+		fm.set_shader_parameter("speed", 1.7)          # whipped, not calm
+	_build_pit_walls()
+	_fire_light.omni_range = 15.0          # the fire reaches the walls
+	# dirty light falling through the hole above, grazing the walls
+	var hole := SpotLight3D.new()
+	hole.light_color = Color("#c9a08c")
+	hole.light_energy = 3.0
+	hole.spot_range = 30.0
+	hole.spot_angle = 48.0
+	hole.spot_attenuation = 0.6
+	hole.shadow_enabled = true
+	hole.position = Vector3(PIT_CENTER.x + 1.5, PIT_H + 3.0, PIT_CENTER.y - 1.0)
+	hole.rotation_degrees = Vector3(-90, 0, 0)
+	_world.add_child(hole)
+	# the gale goes round the pit: emitters all the way round, each blowing along the wall
+	for k: int in range(8):
+		var w := _wind(TAU * k / 8.0, 5.5)
+		_world.add_child(w)
+		_wind_fx.append(w)
+	for k: int in range(5):
+		var s := _souls(TAU * k / 5.0 + 0.3)
+		_world.add_child(s)
+		_souls_fx.append(s)
+
+
+## The pit: a ring of rock (cave_rock.png from all sides) bumped in and out by noise, leaning
+## in as it rises, so the opening above is far narrower than the floor.
+func _build_pit_walls() -> void:
+	var noise := FastNoiseLite.new()
+	noise.seed = 66
+	noise.frequency = 0.18
+	noise.fractal_octaves = 3
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var na := 96
+	var nh := 26
+	var verts: Array[Vector3] = []
+	for j: int in range(nh + 1):
+		var v := float(j) / nh
+		for i: int in range(na + 1):
+			var a := TAU * i / na
+			var dir := Vector3(cos(a), 0, sin(a))
+			# a low vault: the wall rises a little, then bends over into a roof that comes
+			# in over your head, leaving only a small ragged hole in the middle
+			var phi := v * deg_to_rad(80.0)
+			var p := dir * PIT_R
+			var bump := noise.get_noise_3d(p.x * 1.4, v * 9.0, p.z * 1.4)
+			var r := PIT_R * cos(phi) + bump * 1.6 * (1.0 - v * 0.5)
+			var y := PIT_H * sin(phi) - 0.6 + bump * 1.1 * v + noise.get_noise_2d(a * 9.0, 50.0) * 0.4
+			verts.append(Vector3(PIT_CENTER.x, 0, PIT_CENTER.y) + dir * r + Vector3(0, y, 0))
+	for j: int in range(nh):
+		for i: int in range(na):
+			var a0 := j * (na + 1) + i
+			for idx: int in [a0, a0 + na + 1, a0 + 1, a0 + 1, a0 + na + 1, a0 + na + 2]:
+				st.add_vertex(verts[idx])
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
+	_build_stalactites()
+	var m := _toon(CAVE_TEX, Color(1.0, 0.86, 0.82), 0.0)
+	m.uv1_triplanar = true
+	m.uv1_scale = Vector3(0.18, 0.18, 0.18)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = m
+	_world.add_child(mi)
+
+
+## One stretch of the gale: sand and ash blowing round the pit at angle `a`, `r` meters from
+## the middle, along the wall (counter-clockwise seen from above).
+func _wind(a: float, r: float) -> GPUParticles3D:
+	# not lines: veils of sand and ash, big and faint, sweeping round
+	var p := GPUParticles3D.new()
+	p.amount = 18
+	p.lifetime = 1.4
+	p.preprocess = 2.0
+	p.position = Vector3(PIT_CENTER.x + cos(a) * r, 1.8, PIT_CENTER.y + sin(a) * r)
+	p.rotation.y = -a          # local -z points along the wall
+	p.visibility_aabb = AABB(Vector3(-6, -4, -12), Vector3(14, 14, 16))
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(2.0, 2.5, 1.0)
+	pm.direction = Vector3(0, 0.05, -1)      # tangent to the circle at this angle
+	pm.spread = 10.0
+	pm.initial_velocity_min = 5.0
+	pm.initial_velocity_max = 8.0
+	pm.gravity = Vector3(0, -0.2, 0)
+	pm.turbulence_enabled = true
+	pm.turbulence_noise_strength = 0.5
+	pm.turbulence_noise_scale = 4.0
+	pm.scale_min = 1.0
+	pm.scale_max = 2.2
+	var sc := Curve.new()
+	sc.add_point(Vector2(0, 0.5))
+	sc.add_point(Vector2(1, 1.3))
+	var sct := CurveTexture.new()
+	sct.curve = sc
+	pm.scale_curve = sct
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(0.45, 0.34, 0.3, 0.0))
+	ramp.add_point(0.3, Color(0.45, 0.34, 0.3, 0.22))
+	ramp.add_point(0.7, Color(0.38, 0.28, 0.26, 0.18))
+	ramp.set_color(ramp.get_point_count() - 1, Color(0.3, 0.22, 0.2, 0.0))
+	var rt := GradientTexture1D.new()
+	rt.gradient = ramp
+	pm.color_ramp = rt
+	p.process_material = pm
+	var m := StandardMaterial3D.new()
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.vertex_color_use_as_albedo = true
+	m.albedo_texture = _soft_dot()
+	m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON
+	m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED       # lit red by the fire when close
+	var quad := QuadMesh.new()
+	quad.size = Vector2(2.4, 1.3)
+	quad.material = m
+	p.draw_pass_1 = quad
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return p
+
+
+func _cross_streak(size: Vector2) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var w := size.x * 0.5
+	var h := size.y * 0.5
+	for side: Vector3 in [Vector3(w, 0, 0), Vector3(0, 0, w)]:
+		for v: Vector3 in [-side + Vector3(0, -h, 0), side + Vector3(0, -h, 0), side + Vector3(0, h, 0),
+				-side + Vector3(0, -h, 0), side + Vector3(0, h, 0), -side + Vector3(0, h, 0)]:
+			st.set_color(Color.WHITE)
+			st.add_vertex(v)
+	return st.commit()
+
+
+## The souls in the storm: pale figures, arms flung back, carried round the pit high up and
+## low, rising and falling on the wind.
+func _souls(a: float) -> GPUParticles3D:
+	var rows := [
+		"....xx....",
+		"...xxxx...",
+		"....xx....",
+		"xx..xx....",
+		".xxxxxx...",
+		"...xxxxxx.",
+		"...xxx..xx",
+		"...xxx....",
+		"..xx.xx...",
+		".xx...xx..",
+		"xx.....xx.",
+	]
+	var img := Image.create(10, 11, false, Image.FORMAT_RGBA8)
+	for y: int in range(rows.size()):
+		var row: String = rows[y]
+		for x: int in range(10):
+			img.set_pixel(x, y, Color(1, 1, 1, 1) if row[x] == "x" else Color(0, 0, 0, 0))
+	var tex := ImageTexture.create_from_image(img)
+	var p := GPUParticles3D.new()
+	p.amount = 5
+	p.lifetime = 1.6
+	p.preprocess = 2.0
+	var r := PIT_R * 0.7
+	p.position = Vector3(PIT_CENTER.x + cos(a) * r, 2.6, PIT_CENTER.y + sin(a) * r)
+	p.rotation.y = -a
+	p.visibility_aabb = AABB(Vector3(-6, -6, -16), Vector3(16, 16, 20))
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(1.0, 1.4, 1.0)
+	pm.direction = Vector3(0, 0.1, -1)
+	pm.spread = 12.0
+	pm.initial_velocity_min = 7.0
+	pm.initial_velocity_max = 10.0
+	pm.gravity = Vector3.ZERO
+	pm.turbulence_enabled = true
+	pm.turbulence_noise_strength = 2.0      # tossed up and down
+	pm.turbulence_noise_scale = 7.0
+	pm.angle_min = -35.0
+	pm.angle_max = 35.0
+	pm.angular_velocity_min = -80.0
+	pm.angular_velocity_max = 80.0
+	pm.scale_min = 0.8
+	pm.scale_max = 1.4
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(0.75, 0.7, 0.7, 0.0))
+	ramp.add_point(0.2, Color(0.75, 0.7, 0.7, 0.6))
+	ramp.add_point(0.8, Color(0.75, 0.7, 0.7, 0.6))
+	ramp.set_color(ramp.get_point_count() - 1, Color(0.75, 0.7, 0.7, 0.0))
+	var rt := GradientTexture1D.new()
+	rt.gradient = ramp
+	pm.color_ramp = rt
+	p.process_material = pm
+	var m := StandardMaterial3D.new()
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.vertex_color_use_as_albedo = true
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_texture = tex
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	var quad := QuadMesh.new()
+	quad.size = Vector2(1.0, 1.1)
+	quad.material = m
+	p.draw_pass_1 = quad
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return p
+
+
+## Teeth of rock hanging from the roof, so you see it is right over you.
+func _build_stalactites() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 909
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.35
+	cone.bottom_radius = 0.0
+	cone.height = 1.0
+	cone.radial_segments = 6
+	cone.rings = 1
+	var at: Array[Transform3D] = []
+	while at.size() < 70:
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(2.0, PIT_R * 0.85)
+		var q := Vector2(PIT_CENTER.x, PIT_CENTER.y) + Vector2(cos(a), sin(a)) * r
+		if q.distance_to(Vector2(FIRE_AT.x, FIRE_AT.z)) < 1.2:
+			continue          # not over the flames
+		# the roof's height there (the vault: r = R cos(phi), y = H sin(phi))
+		var phi := acos(clampf(r / PIT_R, 0.0, 1.0))
+		var roof := PIT_H * sin(phi) - 0.6
+		var length := rng.randf_range(0.4, 1.8) * (0.6 + 0.4 * (1.0 - r / PIT_R))
+		var b := Basis.from_scale(Vector3(rng.randf_range(0.7, 1.6), length, rng.randf_range(0.7, 1.6)))
+		at.append(Transform3D(b, Vector3(q.x, roof - length * 0.5 + 0.3, q.y)))
+	var m := _toon(CAVE_TEX, Color(0.95, 0.8, 0.76), 0.0)
+	m.uv1_triplanar = true
+	m.uv1_scale = Vector3(0.5, 0.5, 0.5)
+	_multi(cone, at, m)

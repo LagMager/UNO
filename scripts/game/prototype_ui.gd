@@ -26,6 +26,9 @@ const WildPickerScript = preload("res://scripts/game/ui/wild_picker.gd")
 const ShopScreenScript = preload("res://scripts/run/ui/shop_screen.gd")
 const ZoneScreenScript = preload("res://scripts/zones/zone_screen.gd")
 const RestScreenScript = preload("res://scripts/zones/rest_screen.gd")
+const SaveGameScript = preload("res://scripts/run/save_game.gd")
+const SaveToastScript = preload("res://scripts/ui/save_toast.gd")
+var save_toast: SaveToastScript
 const MainMenuScript = preload("res://scripts/menu/main_menu.gd")
 const SettingsPanelScript = preload("res://scripts/menu/settings_panel.gd")
 const UIGrimeScript = preload("res://scripts/ui/grime.gd")
@@ -83,19 +86,29 @@ func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0.02, 0.016, 0.015))
 	screen_burn = ScreenBurnScript.new()
 	add_child(screen_burn)
+	save_toast = SaveToastScript.new()
+	add_child(save_toast)
 	main_menu = MainMenuScript.new()
 	main_menu.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(main_menu)
 	move_child(main_menu, deck_dialog.get_index())
-	main_menu.play_requested.connect(func() -> void:
+	main_menu.set_saves(_saves_list())
+	main_menu.play_requested.connect(func(slot: int) -> void:
 		map_view.debug_tools = false
+		# the page picked to write over, or the first empty one
+		SaveGameScript.slot = slot if slot >= 0 else SaveGameScript.pick_slot_for_new_run()
+		SaveGameScript.clear()
 		start_map_run())
+	main_menu.continue_requested.connect(continue_run)
 	main_menu.debug_requested.connect(show_selection)
 	selection_view.back_requested.connect(show_main_menu)
 	pause_panel = PausePanelScript.new()
 	add_child(pause_panel)
 	move_child(pause_panel, deck_dialog.get_index())
 	pause_panel.resume_requested.connect(func() -> void: pause_panel.visible = false)
+	pause_panel.save_requested.connect(func() -> void:
+		pause_panel.visible = false
+		_save_run())
 	pause_panel.main_menu_requested.connect(func() -> void:
 		pause_panel.visible = false
 		show_main_menu())
@@ -135,11 +148,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		pause_panel.visible = false
 	else:
 		pause_panel.open(map_view.get_seed())
+		if map_view.debug_tools:
+			pause_panel.set_can_save(false, "not in debug runs")
+		else:
+			pause_panel.set_can_save(_scenery == "map", "only on the map")
 	get_viewport().set_input_as_handled()
 
 
 func show_main_menu() -> void:
 	_set_scenery("main_menu")
+	main_menu.set_saves(_saves_list())
 	enemy_stage.clear_hit_effects()
 	combat_view.visible = false
 	map_view.visible = false
@@ -176,6 +194,39 @@ func start_run() -> void:
 	if not run_session.start_run():
 		return
 	_open_combat()
+
+
+## Writes the run to its slot and shows the note in the corner.
+func _save_run() -> void:
+	var zone := _circle_info()
+	if SaveGameScript.save(run_controller.run_state, String(zone.get("hand", "")), String(zone.get("name", ""))):
+		save_toast.show_saving()
+
+
+func _saves_list() -> Array:
+	var out: Array = []
+	for i: int in range(SaveGameScript.SLOTS):
+		out.append(SaveGameScript.peek(i))
+	return out
+
+
+## The circle the run is in (its zone info), written on its paper in the drawer.
+func _circle_info() -> Dictionary:
+	var state := run_controller.run_state
+	if map_view.inferno == null or state == null or state.map_data == null:
+		return {}
+	var node: MapNodeDataScript = state.map_data.get_node(state.current_node_id) if not state.current_node_id.is_empty() else null
+	return map_view.inferno.zone_info(map_view.inferno.zone_of_floor(node.floor_index if node != null else 0))
+
+
+## A saved run (drawer slot), back where it was left on the map.
+func continue_run(slot: int = 0) -> void:
+	map_view.debug_tools = false
+	if not SaveGameScript.load_into(run_controller, slot):
+		start_map_run()
+		return
+	map_view.bind_run_state(run_controller.run_state)
+	_show_map()
 
 
 func start_map_run(seed_value: int = MapGeneratorScript.DEFAULT_SEED, config: MapGeneratorConfigScript = null) -> void:
@@ -281,6 +332,9 @@ func _open_combat() -> void:
 
 func _show_map(_state: RunStateScript = null) -> void:
 	_set_scenery("map")
+	# back on the map: the run is saved here (not the debug ones)
+	if not map_view.debug_tools:
+		_save_run()
 	enemy_stage.clear_hit_effects()
 	selection_view.visible = false
 	combat_view.visible = false
@@ -353,19 +407,22 @@ func _open_shop(state: RunStateScript, shop_data: ShopDataScript) -> void:
 		shop_screen.open(interaction_view)
 
 
-func _on_map_safe_room_requested(_node: MapNodeDataScript, rest_data: RestSiteDataScript) -> void:
-	_open_rest(run_controller.run_state, rest_data)
+func _on_map_safe_room_requested(node: MapNodeDataScript, rest_data: RestSiteDataScript) -> void:
+	# the rest looks like the circle it is in (the pit's counts as the last one)
+	var zone: int = map_view.inferno.zone_of_floor(node.floor_index) if map_view.inferno != null else 0
+	_open_rest(run_controller.run_state, rest_data, 2 if zone < 0 else mini(zone, 2))
 
 
 ## The rest stop from the main menu: a throwaway run, wounded, so both options can be tried.
+## It starts in the Mesquite; buttons at the top walk you into the other circles' rests.
 func open_rest_preview() -> void:
 	_rest_preview = true
 	var state := RunStateScript.new()
 	state.current_health = maxi(state.max_health - PREVIEW_WOUNDS, 1)
-	_open_rest(state, RestSiteDataScript.new())
+	_open_rest(state, RestSiteDataScript.new(), 0)
 
 
-func _open_rest(state: RunStateScript, rest_data: RestSiteDataScript) -> void:
+func _open_rest(state: RunStateScript, rest_data: RestSiteDataScript, circle := 0) -> void:
 	if rest_screen == null:
 		rest_screen = RestScreenScript.new()
 		rest_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -378,7 +435,7 @@ func _open_rest(state: RunStateScript, rest_data: RestSiteDataScript) -> void:
 	map_view.visible = false
 	interaction_view.visible = true
 	interaction_view.open_safe_room(state, rest_data)
-	rest_screen.open(interaction_view)
+	rest_screen.open(interaction_view, circle, _rest_preview)
 
 
 func _on_interaction_finished(pending_encounter: EncounterDataScript) -> void:
@@ -423,6 +480,9 @@ func _connect_signals() -> void:
 	map_view.restart_run_requested.connect(func() -> void: start_map_run())
 
 	run_controller.map_shown.connect(_show_map)
+	run_controller.run_ended.connect(func(_victory: bool) -> void:
+		if not map_view.debug_tools:
+			SaveGameScript.clear())
 	run_controller.combat_requested.connect(_on_map_combat_requested)
 	run_controller.decision_requested.connect(_on_map_decision_requested)
 	run_controller.shop_requested.connect(_on_map_shop_requested)

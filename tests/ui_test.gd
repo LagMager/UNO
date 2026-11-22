@@ -6,6 +6,7 @@ var failures := 0
 
 
 func _initialize() -> void:
+	SaveGame.root = "user://test_saves/"      # never the player's runs
 	_run.call_deferred()
 
 
