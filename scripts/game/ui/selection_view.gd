@@ -6,6 +6,10 @@ signal run_requested
 signal map_run_requested
 ## Open the shop on its own, just to look around and try it.
 signal shop_requested
+## Look at a zone on its own (the rest point, for now).
+signal zone_requested(zone_id: String)
+## The map's rest stop on its own: walk in, sit, choose (to try it without playing).
+signal rest_requested
 
 const EnemyProfiles = preload("res://scripts/game/enemy_profiles.gd")
 
@@ -14,6 +18,8 @@ const EnemyProfiles = preload("res://scripts/game/enemy_profiles.gd")
 @onready var run_button: Button = $Panel/Padding/Choices/ThreeEncounters
 @onready var map_run_button: Button = $Panel/Padding/Choices/MapExpedition
 @onready var shop_button: Button = get_node_or_null("Panel/Padding/Choices/VisitShop")
+@onready var rest_point_button: Button = get_node_or_null("Panel/Padding/Choices/ViewRestPoint")
+@onready var rest_button: Button = get_node_or_null("Panel/Padding/Choices/RestAtFire")
 
 
 func _ready() -> void:
@@ -23,6 +29,10 @@ func _ready() -> void:
 		map_run_button.pressed.connect(func() -> void: map_run_requested.emit())
 	if shop_button != null:
 		shop_button.pressed.connect(func() -> void: shop_requested.emit())
+	if rest_point_button != null:
+		rest_point_button.pressed.connect(func() -> void: zone_requested.emit("rest_point"))
+	if rest_button != null:
+		rest_button.pressed.connect(func() -> void: rest_requested.emit())
 	_populate_enemy_choices()
 
 
