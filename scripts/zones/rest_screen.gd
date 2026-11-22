@@ -9,7 +9,7 @@ const RestPointViewScript = preload("res://scripts/zones/rest_point_view.gd")
 const CREAM := Color("#e8dcc0")
 const DIM := Color("#9c8f78")
 const INK := Color("#120d0b")
-const ITALIC := preload("res://assets/fonts/IMFellEnglish-Italic.ttf")
+const ITALIC := preload("res://assets/fonts/SpecialElite-Regular.ttf")
 
 var view: RestPointViewScript
 var _iv: NodeInteractionView
