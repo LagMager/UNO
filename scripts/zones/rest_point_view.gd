@@ -16,6 +16,11 @@ const FLAME_SHADER := preload("res://resources/shaders/toon_flame.gdshader")
 
 const PIXEL_SHRINK := 3
 const EYE := Vector3(0.0, 1.12, 0.0)     # sitting on the ground by the fire
+## The walk in: from the dark behind you up to your spot by the fire, then you sit down.
+const WALK_FROM := Vector3(0.25, 1.62, 6.0)
+const STAND_EYE := 1.62
+const STEP_LEN := 0.72                       # meters per step
+const ARRIVAL_TIME := 7.0
 const FIRE_AT := Vector3(0.75, 0.0, -2.6)     # to one side: the middle of the screen stays dark
 const TREE_AT := Vector3(-1.5, 0.0, -5.6)     # behind the fire, against the stars
 const LOOK_AT := Vector3(0.1, 0.95, -5.0)    # a little up, so the sky reads
@@ -55,6 +60,10 @@ var _want_yaw := 0.0
 var _want_pitch := 0.0
 var _dragging := false
 var free_look := true
+## 0..1 while walking in (see play_arrival); 1 = seated.
+var _arrival := 1.0
+var _arrival_on := false
+signal arrived
 
 
 func _ready() -> void:
@@ -346,8 +355,8 @@ func _build_rocks() -> void:
 		var ang := rng.randf() * TAU
 		var dist := rng.randf_range(2.2, 16.0)
 		var at := Vector2(CLEARING.x, CLEARING.y) + Vector2(cos(ang), sin(ang)) * dist
-		if Vector2(at.x, at.y).distance_to(Vector2(0, 0)) < 1.6:
-			continue        # not on the player
+		if Vector2(at.x, at.y).distance_to(Vector2(0, 0)) < 1.6 or _on_path(at):
+			continue        # not on the player or the way in
 		if Vector2(at.x, at.y).distance_to(Vector2(FIRE_AT.x, FIRE_AT.z)) < 1.3:
 			continue
 		var mi := MeshInstance3D.new()
@@ -401,7 +410,7 @@ func _build_grass() -> void:
 		var center := Vector2(CLEARING.x, CLEARING.y) + Vector2(cos(ang), sin(ang)) * dist
 		for k: int in range(rng.randi_range(3, 7)):
 			var at := center + Vector2(rng.randf_range(-0.7, 0.7), rng.randf_range(-0.7, 0.7))
-			if at.distance_to(Vector2(0, 0)) < 1.2 or at.distance_to(Vector2(FIRE_AT.x, FIRE_AT.z)) < 1.1:
+			if at.distance_to(Vector2(0, 0)) < 1.2 or at.distance_to(Vector2(FIRE_AT.x, FIRE_AT.z)) < 1.1 or _on_path(at):
 				continue
 			var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.7, 1.4))
 			spots.append(Transform3D(b, Vector3(at.x, height_at(at.x, at.y), at.y)))
@@ -660,15 +669,76 @@ func _update_fire(delta: float) -> void:
 	_ember_fx.amount_ratio = clampf(0.6 + _flare * 0.6, 0.0, 1.0)
 
 
+func _on_path(at: Vector2) -> bool:
+	return absf(at.x - WALK_FROM.x * 0.5) < 1.1 and at.y > -0.6 and at.y < WALK_FROM.z + 1.0
+
+
+## Walks in from the dark and sits down by the fire; emits `arrived` at the end.
+func play_arrival() -> void:
+	free_look = false
+	_arrival = 0.0
+	_arrival_on = true
+
+
+## Click or key during the walk: straight to the seat.
+func skip_arrival() -> void:
+	if _arrival_on:
+		_arrival = 1.0
+
+
+func is_arriving() -> bool:
+	return _arrival_on
+
+
+## A log settles: the fire swells for a moment (a choice was made at the fire).
+func flare(strength := 0.8) -> void:
+	_flare_goal = maxf(_flare_goal, strength)
+
+
+## 1 inside [a, b], easing in and out over the first and last 40 %.
+func _bump(x: float, a: float, b: float) -> float:
+	var r := (b - a) * 0.4
+	return smoothstep(a, a + r, x) * (1.0 - smoothstep(b - r, b, x))
+
+
 func _update_camera(delta: float) -> void:
 	var k := 1.0 - exp(-delta * 8.0)
 	_yaw = lerpf(_yaw, _want_yaw, k)
 	_pitch = lerpf(_pitch, _want_pitch, k)
 	# breathing: barely there
 	var breath := Vector3(0, sin(_time * 1.4) * 0.006, 0)
-	var base := Basis.looking_at(LOOK_AT - EYE, Vector3.UP)
-	var b := Basis(Vector3.UP, _yaw) * base * Basis(Vector3.RIGHT, _pitch)
-	camera.global_transform = Transform3D(b, EYE + breath)
+	var eye := EYE
+	var head_yaw := 0.0
+	var head_pitch := 0.0
+	var head_roll := 0.0
+	if _arrival_on:
+		_arrival = minf(_arrival + delta / ARRIVAL_TIME, 1.0)
+		var u := _arrival
+		# walking (0 .. 0.68): eases out as you reach your spot
+		var w := clampf(u / 0.68, 0.0, 1.0)
+		var walked := 1.0 - pow(1.0 - w, 2.2)
+		var pos := WALK_FROM.lerp(Vector3(EYE.x, STAND_EYE, EYE.z), walked)
+		var dist := walked * WALK_FROM.distance_to(Vector3(EYE.x, STAND_EYE, EYE.z))
+		var phase := dist / STEP_LEN * PI
+		var stride := 1.0 - smoothstep(0.85, 1.0, w)         # the steps die out as you stop
+		pos.y += -absf(sin(phase)) * 0.035 * stride            # down on each footfall
+		pos.x += sin(phase * 0.5) * 0.025 * stride              # weight from foot to foot
+		head_roll = sin(phase * 0.5) * 0.012 * stride
+		# looking around: the tree on the left, then the dark on the right, then the fire
+		head_yaw = 0.5 * _bump(u, 0.14, 0.34) - 0.42 * _bump(u, 0.36, 0.56)
+		head_pitch = 0.12 * _bump(u, 0.14, 0.34) - 0.04 * _bump(u, 0.36, 0.56)
+		head_roll += 0.04 * _bump(u, 0.16, 0.32) - 0.03 * _bump(u, 0.38, 0.54)
+		# sitting down (0.7 .. 0.95): you lower yourself, eyes on the fire, a small settle
+		var s := smoothstep(0.7, 0.93, u)
+		pos.y = lerpf(pos.y, EYE.y, s) - _bump(u, 0.86, 1.0) * 0.025
+		head_pitch -= _bump(u, 0.7, 0.92) * 0.1
+		eye = pos
+		if _arrival >= 1.0:
+			_arrival_on = false
+			arrived.emit()
+	var base := Basis.looking_at(LOOK_AT - eye, Vector3.UP)
+	var b := Basis(Vector3.UP, _yaw + head_yaw) * base * Basis(Vector3.RIGHT, _pitch + head_pitch) * Basis(Vector3.FORWARD, head_roll)
+	camera.global_transform = Transform3D(b, eye + breath)
 
 
 func _gui_input(event: InputEvent) -> void:
