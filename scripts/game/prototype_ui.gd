@@ -35,6 +35,7 @@ var run_controller: RunControllerScript
 var decision_runner_factory: Callable = Callable()
 var shop_screen: ShopScreenScript
 var _shop_preview := false
+var _rest_preview := false
 var zone_screen: ZoneScreenScript
 ## The map's Safe Room, shown as the 3D Rest Point (built when first needed).
 var rest_screen: RestScreenScript
@@ -86,6 +87,7 @@ func _ready() -> void:
 	move_child(shop_screen, interaction_view.get_index() + 1)
 	selection_view.shop_requested.connect(open_shop_preview)
 	selection_view.zone_requested.connect(open_zone_preview)
+	selection_view.rest_requested.connect(open_rest_preview)
 	update_layout()
 
 
@@ -287,6 +289,18 @@ func _open_shop(state: RunStateScript, shop_data: ShopDataScript) -> void:
 
 
 func _on_map_safe_room_requested(_node: MapNodeDataScript, rest_data: RestSiteDataScript) -> void:
+	_open_rest(run_controller.run_state, rest_data)
+
+
+## The rest stop from the main menu: a throwaway run, wounded, so both options can be tried.
+func open_rest_preview() -> void:
+	_rest_preview = true
+	var state := RunStateScript.new()
+	state.current_health = maxi(state.max_health - PREVIEW_WOUNDS, 1)
+	_open_rest(state, RestSiteDataScript.new())
+
+
+func _open_rest(state: RunStateScript, rest_data: RestSiteDataScript) -> void:
 	if rest_screen == null:
 		rest_screen = RestScreenScript.new()
 		rest_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -298,7 +312,7 @@ func _on_map_safe_room_requested(_node: MapNodeDataScript, rest_data: RestSiteDa
 	combat_view.visible = false
 	map_view.visible = false
 	interaction_view.visible = true
-	interaction_view.open_safe_room(run_controller.run_state, rest_data)
+	interaction_view.open_safe_room(state, rest_data)
 	rest_screen.open(interaction_view)
 
 
@@ -307,6 +321,10 @@ func _on_interaction_finished(pending_encounter: EncounterDataScript) -> void:
 		shop_screen.close()
 	if rest_screen != null:
 		rest_screen.close()
+	if _rest_preview:
+		_rest_preview = false
+		show_selection()
+		return
 	if _shop_preview:
 		_shop_preview = false
 		show_selection()
