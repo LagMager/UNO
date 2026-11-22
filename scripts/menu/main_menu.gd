@@ -15,7 +15,10 @@ extends Control
 ## - Quit: the lamp's flame is blown out (it bends, dies, smokes), then the game closes.
 ## The props are simple shapes for now (to be swapped for Tripo models).
 
-signal play_requested
+## slot: the save slot the new run goes to (-1: the first empty one).
+signal play_requested(slot: int)
+## A saved run picked in the drawer (SaveGame slot): same walk out through the door.
+signal continue_requested(slot: int)
 signal debug_requested
 
 const FONT := preload("res://assets/fonts/SpecialElite-Regular.ttf")
@@ -39,6 +42,7 @@ const CHAIN := 1.25
 const DIM := Color(0.42, 0.38, 0.33, 1)
 const CHAR := Color(0.36, 0.22, 0.14, 1)     # burnt words at rest: dark, but readable
 const SMOULDER := Color(1.0, 0.45, 0.15, 1)
+const ASHEN := Color(0.23, 0.215, 0.2, 1)    # a word you can't pick: cold ash, as dark as the rest
 const ROOM_W := 3.0      # half width of the room (smaller: it was a hall, it felt empty)
 const TABLE_AT := Vector3(-ROOM_W + 0.6, 0, 2.6)
 const CHIPS_AT := TABLE_AT + Vector3(0.2, 0.83, 0.12)      # the stack of chips (volume): near edge, on the right
@@ -688,7 +692,7 @@ func _build_decor() -> void:
 		_world.add_child(poster)
 	# barrels in the front right corner, crates stacked in the front left one
 	for k: int in range(2):
-		var at := Vector3(ROOM_W - 0.4 - k * 0.65, 0, 0.45 + k * 0.1)
+		var at := Vector3(ROOM_W - 0.4, 0, 0.45 + k * 0.65)
 		_cyl(0.28, 0.3, 0.85, at + Vector3(0, 0.425, 0), _wood(Color(0.34, 0.22, 0.14)))
 		for band: float in [0.12, 0.73]:
 			_cyl(0.305, 0.305, 0.05, at + Vector3(0, band, 0), _flat(Color(0.09, 0.08, 0.07)))
@@ -756,14 +760,15 @@ func _word(text: String, size: int, at: Vector3, facing := Vector3.ZERO) -> Labe
 
 
 ## Something you can look at: when the mouse is on it, the eye leans in (focus) and it warms.
+## when: optional; while it returns false the thing can't be picked (a word shows greyed out).
 func _add_target(kind: String, place: String, label: Label3D, center: Vector3, extent: Vector3,
-		focus: float, action: Callable) -> void:
+		focus: float, action: Callable, when := Callable()) -> void:
 	# the area only measures where the thing is on screen; picking is done in _pick()
 	var hit := Control.new()
 	hit.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hits.add_child(hit)
 	_targets.append({"kind": kind, "place": place, "label": label, "center": center, "extent": extent,
-		"focus": focus, "hit": hit, "heat": 0.0, "action": action, "meshes": []})
+		"focus": focus, "hit": hit, "heat": 0.0, "action": action, "meshes": [], "when": when})
 
 
 ## The meshes of a thing get an ember outline while you look at it.
@@ -772,8 +777,13 @@ func _outline_meshes(index: int, meshes: Array) -> void:
 
 
 func _set_outline(t: Dictionary, on: bool) -> void:
+	if t.has("edge"):
+		(t["edge"] as Node3D).visible = on
 	var l: Label3D = t["label"]
-	if l != null:
+	if l != null and t.get("plain", false):
+		l.outline_size = 0
+		l.scale = Vector3.ONE * (1.0 + 0.1 * float(t["heat"]))
+	elif l != null:
 		l.outline_size = 10 if on else 0
 		l.outline_modulate = Color(0.9, 0.35, 0.1, 0.9)
 	for mi: MeshInstance3D in t["meshes"]:
@@ -793,10 +803,14 @@ func _set_outline(t: Dictionary, on: bool) -> void:
 func _build_targets() -> void:
 	_title = _word("UNTITLED", 200, Vector3(-1.7, 2.45, 0.02))
 	_title.modulate = Color(0.42, 0.27, 0.17, 1)
-	var words := [["Play", _play], ["Settings", func() -> void: _turn("corner")], ["Quit", _quit]]
+	var words := [["New Game", _new_game], ["Load Game", func() -> void: _open_drawer(false)],
+		["Settings", func() -> void: _turn("corner")], ["Quit", _quit]]
+	_menu_words.clear()
 	for i: int in range(words.size()):
-		var l := _word(words[i][0], 110, Vector3(-1.55, 1.45 - i * 0.5, 0.02))
-		_add_target("word", "front", l, Vector3.ZERO, Vector3.ZERO, 0.18, words[i][1])
+		var l := _word(words[i][0], 95, Vector3(-1.55, 1.65 - i * 0.4, 0.02))     # four words: the last stays above the floor
+		_add_target("word", "front", l, Vector3.ZERO, Vector3.ZERO, 0.18, words[i][1],
+			has_saves if words[i][0] == "Load Game" else Callable())
+		_menu_words.append(l)
 	_add_target("chips", "corner", null, CHIPS_AT + Vector3(0, 0.08, 0), Vector3(0.12, 0.18, 0.12), 0.3, func() -> void: pass)
 	_outline_meshes(_targets.size() - 1, _chips)
 	_add_target("card", "corner", null, CARD_AT + Vector3(0, 0.01, 0), Vector3(0.17, 0.03, 0.17), 0.3, func() -> void:
@@ -806,6 +820,7 @@ func _build_targets() -> void:
 	for c in _card.get_children():
 		card_meshes.append(c)
 	_outline_meshes(_targets.size() - 1, card_meshes)
+	_build_dresser()          # its papers are targets too
 	_build_tip()
 
 func _on_target_input(index: int, e: InputEvent) -> void:
@@ -948,9 +963,14 @@ func _turn(place: String) -> void:
 	_hot = -1
 
 
-func _play() -> void:
+func _play(resume := false) -> void:
+	_resuming = resume
 	_turn("door")
 	_walk = 0.0
+
+
+var _menu_words: Array[Label3D] = []
+var _resuming := false
 
 
 func _quit() -> void:
@@ -973,12 +993,14 @@ func _save_settings() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not visible or _place != "corner":
+	if not visible or not (_place in ["corner", "drawer", "paper"]):
 		return
 	var back: bool = (event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE) \
 		or (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT)
 	if back:
-		_turn("front")
+		if _place != "paper":
+			_overwrite = false
+		_turn("drawer" if _place == "paper" else "front")
 		get_viewport().set_input_as_handled()
 
 
@@ -993,14 +1015,23 @@ func _process(delta: float) -> void:
 	_update_camera(delta)
 	_update_lamp(delta)
 	_update_corner(delta)
+	_update_drawer(delta)
 	for i: int in range(_targets.size()):
 		var t: Dictionary = _targets[i]
-		var here: bool = t["place"] == _place and _walk < 0.0 and _blow < 0.0
+		var shown: bool = t["label"] == null or (t["label"] as Label3D).is_visible_in_tree()
+		var when: Callable = t["when"]
+		var enabled: bool = when.is_null() or bool(when.call())
+		var here: bool = t["place"] == _place and _walk < 0.0 and _blow < 0.0 and shown and enabled
 		var hot: bool = i == _hot and here
 		t["heat"] = move_toward(float(t["heat"]), 1.0 if hot else 0.0, delta * (6.0 if hot else 2.5))
 		var l: Label3D = t["label"]
 		if l != null:
-			l.modulate = CHAR.lerp(SMOULDER, float(t["heat"]))
+			if t.get("button", false):
+				l.modulate = INK_RED.lerp(Color(0.85, 0.2, 0.05), float(t["heat"]))
+			elif t.get("plain", false):
+				l.modulate = INK.lerp(INK_RED, float(t["heat"]))
+			else:
+				l.modulate = CHAR.lerp(SMOULDER, float(t["heat"])) if enabled else ASHEN     # greyed out, but still readable
 		_set_outline(t, hot)
 		var hit: Control = t["hit"]
 		hit.visible = here
@@ -1010,7 +1041,9 @@ func _process(delta: float) -> void:
 			else:
 				_fit_box(hit, t["center"], t["extent"])
 	_pick()
-	_hint.text = "Press Esc to go back" if _place == "corner" else ""
+	_hint.text = "Press Esc to go back" if _place in ["corner", "drawer", "paper"] else ""
+	if _overwrite and _place == "drawer":
+		_hint.text = "The drawer is full: pick a page to write the new run over  ·  Esc to go back"
 	_update_tip(delta)
 
 
@@ -1025,6 +1058,10 @@ func _update_camera(delta: float) -> void:
 	var base: Array = VIEW_FRONT
 	if _place == "corner":
 		base = VIEW_CORNER
+	elif _place == "drawer":
+		base = VIEW_DRAWER
+	elif _place == "paper":
+		base = [VIEW_DRAWER[0], HOLD_AT]      # you look up from the drawer at the page
 	elif _place == "door":
 		base = VIEW_DOOR
 	var pos: Vector3 = base[0]
@@ -1060,7 +1097,10 @@ func _update_camera(delta: float) -> void:
 			c.visible = open < 0.05
 		if _walk > 3.6:
 			_walk = -1.0
-			play_requested.emit()
+			if _resuming:
+				continue_requested.emit(_load_slot)
+			else:
+				play_requested.emit(_overwrite_slot)
 	var k := 1.0 - exp(-delta * 3.5)
 	_cam_pos = _cam_pos.lerp(pos, k)
 	_cam_look = _cam_look.lerp(look, k)
@@ -1068,7 +1108,8 @@ func _update_camera(delta: float) -> void:
 	var right := (_cam_look - _cam_pos).cross(Vector3.UP).normalized()
 	var gaze := right * _gaze.x * 0.28 + Vector3.UP * -_gaze.y * 0.16
 	var sway := Vector3(sin(_time * 0.37) * 0.02, sin(_time * 0.53) * 0.012, 0)
-	_camera.look_at_from_position(_cam_pos + sway + bob, _cam_look + gaze + sway * 0.5)
+	var jolt := Vector3(sin(_time * 90.0), cos(_time * 73.0), 0) * _shake     # the drawer slammed
+	_camera.look_at_from_position(_cam_pos + sway + bob + jolt, _cam_look + gaze + sway * 0.5 + jolt)
 
 
 func _update_lamp(delta: float) -> void:
@@ -1077,6 +1118,8 @@ func _update_lamp(delta: float) -> void:
 		want = _target_point(_targets[_hot]) + Vector3(0, 0.05, 0)
 	elif _place == "corner":
 		want = TABLE_AT + Vector3(0.05, 0.85, 0.0)
+	elif _place in ["drawer", "paper"]:
+		want = DRESSER_AT + Vector3(0, 0.6, DRAWER_OUT)
 	elif _place == "door":
 		want = DOOR_AT + Vector3(-0.05, 1.1, 0.1)
 	else:
@@ -1167,3 +1210,384 @@ func _fit(hit: Control, pts: Array[Vector3], pad: Vector2) -> void:
 		hi = hi.max(s)
 	hit.position = lo - pad
 	hit.size = hi - lo + pad * 2.0
+
+
+# ------------------------------------------------------------------ the dresser (Load Game)
+## An old dresser under the shelf. "Load Game" turns you to it and its top drawer is yanked
+## open: in it lie three torn notebook pages, one per save slot, each with its number and
+## the circle that run is in. Click a page and you pick it up and hold it in front of you:
+## the whole run written on it (where, life, coins, deck, when), with "Load" and "Put back"
+## at the bottom. Esc or right click puts the page back; again, and the drawer is slammed.
+const DRESSER_AT := Vector3(1.7, 0, 0.3)
+const VIEW_DRAWER := [Vector3(1.7, 1.5, 1.3), Vector3(1.7, 0.55, 0.6)]
+const DRAWER_OUT := 0.36
+## Where you hold a page up to read it: in front of your face, well above the dresser.
+const HOLD_AT := Vector3(1.7, 1.36, 0.68)
+const SLOTS_SHOWN := 3
+const ROMAN := ["I", "II", "III"]
+const INK := Color(0.12, 0.07, 0.04)
+const PAGE_TEX := preload("res://assets/ui/notebook_page.png")
+const HAND := preload("res://assets/fonts/HomemadeApple-Regular.ttf")
+const INK_RED := Color(0.55, 0.07, 0.03)
+var _drawer: Node3D
+var _drawer_open := 0.0
+var _drawer_from := 0.0          # the drawer's move: from where, to where, how long ago
+var _drawer_to := 0.0
+var _drawer_anim := 10.0
+var _drawer_wait := 0.0          # a beat after you turn to it before it is pulled
+var _shake := 0.0                # the slam shakes the view
+var _slot_labels: Array[Label3D] = []
+var _slot_papers: Array[MeshInstance3D] = []
+var _saves: Array = []           # SaveGame.peek() of each slot
+var _load_slot := -1
+var _held: MeshInstance3D        # the paper you picked up
+var _held_title: Label3D
+var _held_where: Label3D
+var _held_rows: Array[Label3D] = []
+var _held_load: Label3D
+var _overwrite := false          # New Game with all three pages taken: pick one to write over
+var _overwrite_slot := -1
+const ICON_HEART := [".xx...xx.", "xxxx.xxxx", "xxxxxxxxx", "xxxxxxxxx", ".xxxxxxx.", "..xxxxx..", "...xxx...", "....x....", "........."]
+const ICON_COIN := ["..xxxxx..", ".x.....x.", "x..xxx..x", "x.x...x.x", "x.x......", "x.x...x.x", "x..xxx..x", ".x.....x.", "..xxxxx.."]
+const ICON_CARD := [".xxxxxx..", ".x....x..", ".x.xx.x..", ".x..x.x..", ".x..x.x..", ".x.xxxx..", ".x....x..", ".xxxxxx..", "........."]
+const ICON_UP := ["....x....", "...xxx...", "..xxxxx..", ".xxxxxxx.", "...xxx...", "...xxx...", "...xxx...", "...xxx...", "........."]
+const ICON_CROSS := ["x.......x", ".x.....x.", "..x...x..", "...x.x...", "....x....", "...x.x...", "..x...x..", ".x.....x.", "x.......x"]
+const ICON_CLOCK := ["..xxxxx..", ".x..x..x.", "x...x...x", "x...x...x", "x...xxx.x", "x.......x", "x.......x", ".x.....x.", "..xxxxx.."]
+var _held_t := 0.0               # 0 in the drawer .. 1 held up in front of you
+var _held_from := Transform3D()
+
+
+func _build_dresser() -> void:
+	var body := _wood(Color(0.33, 0.22, 0.14))
+	var dark := _wood(Color(0.22, 0.15, 0.1))
+	var w := 1.0
+	var d := 0.46
+	var h := 0.86
+	_box(Vector3(w, 0.04, d), DRESSER_AT + Vector3(0, h, 0), body)                   # top
+	_box(Vector3(0.04, h, d), DRESSER_AT + Vector3(-w * 0.5 + 0.02, h * 0.5, 0), body)
+	_box(Vector3(0.04, h, d), DRESSER_AT + Vector3(w * 0.5 - 0.02, h * 0.5, 0), body)
+	_box(Vector3(w, h, 0.03), DRESSER_AT + Vector3(0, h * 0.5, -d * 0.5 + 0.015), dark)  # back
+	# the two lower drawers stay shut
+	for k: int in range(2):
+		var y := 0.17 + k * 0.24
+		_box(Vector3(w - 0.08, 0.21, 0.03), DRESSER_AT + Vector3(0, y, d * 0.5 - 0.01), body)
+		var knob := _cyl(0.018, 0.018, 0.03, DRESSER_AT + Vector3(0, y, d * 0.5 + 0.015), _flat(Color(0.12, 0.1, 0.08)))
+		knob.rotation.x = PI * 0.5
+	# the top one opens: a tray with a front and a knob; the papers lie in it
+	_drawer = Node3D.new()
+	_drawer.position = DRESSER_AT + Vector3(0, 0.66, 0)
+	_world.add_child(_drawer)
+	_box(Vector3(w - 0.1, 0.02, d - 0.06), Vector3(0, -0.08, 0), dark, _drawer)          # bottom
+	for sx: float in [-1.0, 1.0]:
+		_box(Vector3(0.02, 0.14, d - 0.06), Vector3(sx * (w * 0.5 - 0.06), -0.02, 0), dark, _drawer)
+	# the front covers the whole opening up to the top (no gap to see the papers through)
+	_box(Vector3(w - 0.08, 0.27, 0.03), Vector3(0, 0.025, d * 0.5 - 0.01), body, _drawer)
+	var pull := _cyl(0.025, 0.025, 0.04, Vector3(0, 0, d * 0.5 + 0.02), _flat(Color(0.15, 0.12, 0.09)), _drawer)
+	pull.rotation.x = PI * 0.5
+	for i: int in range(SLOTS_SHOWN):
+		var paper := _paper(Vector2(0.27, 0.18))
+		paper.rotation = Vector3(-PI * 0.5, 0.07 * (i - 1), 0)
+		paper.position = Vector3((i - 1) * 0.29, -0.066 + 0.002 * i, 0.04)
+		_drawer.add_child(paper)
+		_slot_papers.append(paper)
+		var l := _ink(40, 0.001, 240)
+		l.position = Vector3(0, 0.0, 0.002)
+		paper.add_child(l)
+		_slot_labels.append(l)
+		var edge := _edge(Vector2(0.27, 0.18), Color(1.0, 0.45, 0.15))
+		edge.visible = false
+		paper.add_child(edge)
+		var open_at := _drawer.position + Vector3(0, 0, DRAWER_OUT) + paper.position
+		_add_target("slot", "drawer", null, open_at, Vector3(0.26, 0.02, 0.18), 0.0, _pick_slot.bind(i),
+			func() -> bool: return _drawer_open > 0.9 and i < _saves.size() and not (_saves[i] as Dictionary).is_empty())
+		_targets[_targets.size() - 1]["edge"] = edge
+	# the paper you hold up: bigger writing, and what you can do with it
+	# held in landscape, like the page it is: where on the left of the fold, the rest on the right
+	_held = _paper(Vector2(0.64, 0.42))
+	_held.visible = false
+	_world.add_child(_held)
+	_held.add_child(_edge(Vector2(0.64, 0.42), Color(0.05, 0.03, 0.02)))
+	# left of the fold: which run and where; right of it: one stat a line, each with its drawing
+	_held_title = _ink_left(54, 0.0008, 330)
+	_held_title.position = Vector3(-0.29, 0.15, 0.002)
+	_held.add_child(_held_title)
+	_held_where = _ink_left(34, 0.0008, 330)
+	_held_where.position = Vector3(-0.29, 0.065, 0.002)
+	_held.add_child(_held_where)
+	var icons := [ICON_HEART, ICON_COIN, ICON_CARD, ICON_UP, ICON_CROSS, ICON_CLOCK]
+	for r: int in range(icons.size()):
+		var y := 0.155 - r * 0.062
+		var s := Sprite3D.new()
+		s.texture = _icon(icons[r], INK_RED if r == 0 else INK)
+		s.pixel_size = 0.0036
+		s.shaded = false
+		s.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		s.position = Vector3(0.045, y, 0.002)
+		_held.add_child(s)
+		var l := _ink_left(34, 0.0008, 300)
+		l.position = Vector3(0.075, y, 0.002)
+		_held.add_child(l)
+		_held_rows.append(l)
+	# the two things you can do: in red ink, each in a box drawn round it by hand, clear of
+	# the burn hole in the corner (so they read as buttons, not as more writing)
+	_held_load = _button("Load", Vector3(-0.13, -0.035, 0.003), _take_page)
+	_button("Put back", Vector3(-0.13, -0.1, 0.003), _put_back)
+	_fill_papers()
+
+
+## A word on the held page you can press: red ink, underlined by hand (a stroke as wide as
+## the word, centred under it). Hovered, the ink brightens and the word swells.
+var _underlines := {}
+
+
+func _button(text: String, at: Vector3, action: Callable) -> Label3D:
+	var l := _ink(42, 0.0008, 0)
+	l.text = text
+	l.modulate = INK_RED
+	l.position = at
+	_held.add_child(l)
+	_add_target("word", "paper", l, Vector3.ZERO, Vector3.ZERO, 0.0, action)
+	_targets[_targets.size() - 1]["plain"] = true
+	_targets[_targets.size() - 1]["button"] = true
+	var stroke := MeshInstance3D.new()
+	stroke.mesh = QuadMesh.new()
+	var m := StandardMaterial3D.new()
+	m.albedo_color = INK_RED
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	stroke.material_override = m
+	stroke.rotation.z = -0.025
+	_held.add_child(stroke)
+	_underlines[l] = stroke
+	_fit_underline(l)
+	return l
+
+
+func _fit_underline(l: Label3D) -> void:
+	var w := HAND.get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, l.font_size).x * l.pixel_size
+	var stroke: MeshInstance3D = _underlines[l]
+	(stroke.mesh as QuadMesh).size = Vector2(w * 0.95, 0.005)
+	stroke.position = l.position + Vector3(0, -0.024, -0.0005)
+
+
+## A flat border just behind a page (an outline: a quad can't grow one from its normals).
+func _edge(size: Vector2, col: Color) -> MeshInstance3D:
+	var e := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = size + Vector2(0.018, 0.018)
+	e.mesh = q
+	var m := StandardMaterial3D.new()
+	m.albedo_color = col
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	e.material_override = m
+	e.position = Vector3(0, 0, -0.0015)
+	return e
+
+
+## A small drawing in ink, from rows of "x" (a pixel) and "." (none).
+func _icon(rows: Array, col: Color) -> ImageTexture:
+	var img := Image.create(9, 9, false, Image.FORMAT_RGBA8)
+	for y: int in range(9):
+		var row: String = rows[y]
+		for x: int in range(9):
+			img.set_pixel(x, y, col if row[x] == "x" else Color(0, 0, 0, 0))
+	return ImageTexture.create_from_image(img)
+
+
+## Ink that starts at its position and runs right (Label3D centers on it otherwise).
+func _ink_left(font_size: int, pixel: float, width: int) -> Label3D:
+	var l := _ink(font_size, pixel, width)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return l
+
+
+func _paper(size: Vector2) -> MeshInstance3D:
+	var paper := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = size
+	paper.mesh = q
+	# a page torn from the same stained notebook as the map's to-do list
+	var pm := StandardMaterial3D.new()
+	pm.albedo_texture = PAGE_TEX
+	pm.albedo_color = Color(1.22, 1.16, 1.06)
+	pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	pm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED     # always readable
+	pm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	paper.material_override = pm
+	return paper
+
+
+## Ink on paper: written by hand (the same hand as the map's to-do list), dark, wrapped to
+## `width` pixels (0 = no wrap).
+func _ink(font_size: int, pixel: float, width: int) -> Label3D:
+	var l := Label3D.new()
+	l.font = HAND
+	l.font_size = font_size
+	l.pixel_size = pixel
+	l.modulate = INK
+	l.outline_size = 0
+	l.shaded = false
+	l.double_sided = false
+	l.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if width > 0:
+		l.width = width
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return l
+
+
+func _fill_papers() -> void:
+	for i: int in range(_slot_labels.size()):
+		var info: Dictionary = _saves[i] if i < _saves.size() else {}
+		var l := _slot_labels[i]
+		if info.is_empty():
+			l.text = "%s\nempty" % ROMAN[i]
+			l.modulate = Color(INK, 0.4)
+		else:
+			l.text = "%s\n%s" % [ROMAN[i], str(info.get("circle_short", "The road")).capitalize()]
+			l.modulate = INK
+
+
+## The held page's writing for slot i.
+func _write_page(info: Dictionary, i: int) -> void:
+	var step := int(info.get("step", -1))
+	_held_title.text = "Run %s" % ROMAN[i]
+	_held_where.text = "%s\n%s" % [str(info.get("circle_short", "The road")).capitalize(),
+		"step %d" % (step + 1) if step >= 0 else "not set out"]
+	var when := Time.get_datetime_dict_from_unix_time(int(info.get("saved_at", 0)) + _utc_offset())
+	var deck: Array = info.get("deck", [])
+	var upgraded := 0
+	for c: Variant in deck:
+		if bool((c as Dictionary).get("upgraded", false)):
+			upgraded += 1
+	var rows := [
+		"%d / %d" % [int(info.get("current_health", 0)), int(info.get("max_health", 0))],
+		"%d coins" % int(info.get("gold", 0)),
+		"%d cards" % deck.size(),
+		"%d upgraded" % upgraded,
+		"%d places" % (info.get("completed_node_ids", []) as Array).size(),
+		"%02d/%02d %02d:%02d" % [int(when["day"]), int(when["month"]), int(when["hour"]), int(when["minute"])],
+	]
+	for r: int in range(_held_rows.size()):
+		_held_rows[r].text = rows[r]
+	_held_load.text = "Write over" if _overwrite else "Load"
+	_fit_underline(_held_load)
+
+
+func _utc_offset() -> int:
+	return int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+
+
+## The saved runs, from SaveGame.peek() of each slot: the papers are rewritten, and "Load
+## Game" is greyed out when there is none.
+func set_saves(saves: Array) -> void:
+	_saves = saves
+	if not _slot_labels.is_empty():
+		_fill_papers()
+
+
+func has_saves() -> bool:
+	for s: Dictionary in _saves:
+		if not s.is_empty():
+			return true
+	return false
+
+
+func _pick_slot(i: int) -> void:
+	_load_slot = i
+	_write_page(_saves[i], i)
+	_held_from = _slot_papers[i].global_transform
+	_held_t = 0.0
+	_held.visible = true
+	_slot_papers[i].visible = false
+	_turn("paper")
+
+
+func _put_back() -> void:
+	_turn("drawer")
+
+
+func _new_game() -> void:
+	_overwrite_slot = -1
+	if _saves.size() >= SLOTS_SHOWN and _saves.all(func(s: Dictionary) -> bool: return not s.is_empty()):
+		_open_drawer(true)       # no empty page: pick one to write over
+		return
+	_play()
+
+
+func _open_drawer(overwrite: bool) -> void:
+	_overwrite = overwrite
+	_turn("drawer")
+
+
+## "Load" on the page, or "Write over" when the drawer was full for a new run.
+func _take_page() -> void:
+	if _overwrite:
+		_overwrite_slot = _load_slot
+		_overwrite = false
+		_play()
+	else:
+		_play(true)
+
+
+## Where the paper is held: in front of your eyes, facing you, a little tilted.
+func _held_pose() -> Transform3D:
+	var eye: Vector3 = VIEW_DRAWER[0]
+	var at := HOLD_AT
+	var t := Transform3D(Basis.looking_at(-(eye - at).normalized(), Vector3.UP), at)
+	return t.rotated_local(Vector3.FORWARD, 0.03)
+
+
+func _update_drawer(delta: float) -> void:
+	if _drawer == null:
+		return
+	var here := _place in ["drawer", "paper"]
+	_drawer_wait = _drawer_wait + delta if here else 0.0
+	var want := 1.0 if here and _drawer_wait > 0.3 else 0.0     # yanked once you face it
+	if want != _drawer_to:
+		_drawer_to = want
+		_drawer_from = _drawer_open
+		_drawer_anim = 0.0
+	_drawer_anim += delta
+	if _drawer_to > 0.5:
+		# open: it sticks a moment (a small jerk), then slides out and overshoots a hair
+		var u := clampf(_drawer_anim / 0.4, 0.0, 1.0)
+		var stick := 0.05 * sin(clampf(u / 0.2, 0.0, 1.0) * PI * 0.5)
+		var v := clampf((u - 0.2) / 0.8, 0.0, 1.0)
+		var back := 1.0 + 3.0 * pow(v - 1.0, 3.0) + 2.0 * pow(v - 1.0, 2.0)     # a hard overshoot
+		_drawer_open = lerpf(_drawer_from, 1.0, maxf(stick, back if v > 0.0 else 0.0))
+		if _drawer_anim - delta < 0.4 * 0.2 and _drawer_anim >= 0.4 * 0.2:
+			_shake = 0.012          # the yank
+	else:
+		# slammed: it speeds up all the way in, bangs, bounces a hair
+		var u := clampf(_drawer_anim / 0.38, 0.0, 1.0)
+		_drawer_open = lerpf(_drawer_from, 0.0, pow(u, 2.2))
+		if u >= 1.0:
+			var b2 := _drawer_anim - 0.38
+			if b2 < delta and _drawer_from > 0.3:
+				_shake = 0.03
+			_drawer_open = 0.03 * sin(clampf(b2 / 0.16, 0.0, 1.0) * PI) * float(_drawer_from > 0.3)
+	_drawer.position.z = DRESSER_AT.z + _drawer_open * DRAWER_OUT
+	_shake = move_toward(_shake, 0.0, delta * 0.12)
+	# walking out with it: it goes in your pocket
+	if _place == "door" and _held != null and _held.visible:
+		_held.visible = false
+		_slot_papers[_load_slot].visible = true
+	# the paper you picked up rises to your eyes, or goes back down into the drawer
+	if _held != null and _held.visible:
+		var up := _place == "paper"
+		_held_t = move_toward(_held_t, 1.0 if up else 0.0, delta * 1.7)
+		var s := _held_t * _held_t * (3.0 - 2.0 * _held_t)
+		var from := _slot_papers[_load_slot].global_transform if _load_slot >= 0 else _held_from
+		var to := _held_pose()
+		var lift := from.origin + Vector3(0, 0.42, 0.04)          # up out of the drawer first
+		var pos := from.origin.lerp(lift, s).lerp(lift.lerp(to.origin, s), s)
+		var rot := from.basis.get_rotation_quaternion().slerp(to.basis.get_rotation_quaternion(), s)
+		_held.global_transform = Transform3D(Basis(rot), pos)
+		_held.scale = Vector3.ONE * lerpf(0.42, 1.0, s)
+		if not up and _held_t <= 0.0:
+			_held.visible = false
+			_slot_papers[_load_slot].visible = true
