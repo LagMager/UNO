@@ -24,12 +24,7 @@ var _leaving := false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	view = RestPointViewScript.new()
-	view.set_anchors_preset(Control.PRESET_FULL_RECT)
-	view.free_look = false
-	view.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(view)
-	view.arrived.connect(_show_ui)
+	_make_view(RestPointViewScript.Circle.MESQUITE)
 	var film := ColorRect.new()
 	film.set_anchors_preset(Control.PRESET_FULL_RECT)
 	film.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -118,8 +113,27 @@ func _on_visibility() -> void:
 		view.viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if visible else SubViewport.UPDATE_DISABLED
 
 
+## The place is built for one circle: going to another one builds it again.
+func _make_view(circle: int) -> void:
+	if view != null:
+		view.queue_free()
+	view = RestPointViewScript.new()
+	view.circle = circle
+	view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	view.free_look = false
+	view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(view)
+	move_child(view, 0)
+	view.arrived.connect(_show_ui)
+
+
 ## Shows the safe room the interaction view has just opened: fade in, walk in, sit, choose.
-func open(iv: NodeInteractionView) -> void:
+## circle: RestPointView.Circle (0 the Mesquite, 1 Limbo, 2 Lust).
+## switcher: only from the debug menu, to walk into each circle's rest in turn.
+func open(iv: NodeInteractionView, circle := 0, switcher := false) -> void:
+	if view.circle != circle:
+		_make_view(circle)
+	_show_switcher(switcher)
 	_iv = iv
 	_leaving = false
 	visible = true
@@ -202,3 +216,28 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if visible and view.is_arriving() and event.pressed:
 		view.skip_arrival()
 		get_viewport().set_input_as_handled()
+
+
+# ------------------------------------------------------------------ debug: change circle
+const CIRCLE_NAMES := ["Mesquite", "Limbo", "Lust"]
+var _circles: HBoxContainer
+
+
+func _show_switcher(on: bool) -> void:
+	if _circles == null:
+		_circles = HBoxContainer.new()
+		_circles.add_theme_constant_override("separation", 8)
+		_circles.position = Vector2(16, 16)
+		add_child(_circles)
+		for i: int in range(CIRCLE_NAMES.size()):
+			var b := Button.new()
+			b.text = CIRCLE_NAMES[i]
+			b.toggle_mode = true
+			b.custom_minimum_size = Vector2(110, 36)
+			b.focus_mode = Control.FOCUS_NONE
+			b.pressed.connect(func() -> void: open(_iv, i, true))     # walk in again
+			_circles.add_child(b)
+	_circles.visible = on
+	move_child(_circles, get_child_count() - 1)
+	for i: int in range(_circles.get_child_count()):
+		(_circles.get_child(i) as Button).set_pressed_no_signal(i == view.circle)
